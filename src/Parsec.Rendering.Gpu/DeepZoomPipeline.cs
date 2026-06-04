@@ -12,13 +12,15 @@ namespace Parsec.Rendering.DeepZoom;
 [StructLayout(LayoutKind.Sequential)]
 internal struct DeepParamsGpu
 {
-    public int Width, Height, RowOffset, RowCount;   // 0..32
-    public int RefCount, MaxIter, Pad0, Pad1;        // ..32
+    public int Width, Height, RowOffset, RowCount;   // @0
+    public int RefCount, MaxIter, Formula, DirectMode; // @16 (formula 0..3; DirectMode 0/1)
     public double RefDcX, RefDcY;                    // dvec2 refDc   @32
     public double PixelDxX, PixelDxY;                // dvec2 pixelDx @48
     public double PixelDyX, PixelDyY;                // dvec2 pixelDy @64
     public double JitterX, JitterY;                  // dvec2 jitter  @80
-    public double EscapeR2, Pad2;                    // @96 ..112
+    public double KappaX, KappaY;                    // dvec2 kappa   @96
+    public double CdX, CdY;                          // dvec2 cd      @112
+    public double EscapeR2, Pad2;                    // @128 ..144
 }
 
 // std430 layout for the color pass. MUST match ColorParams in deepzoom_color.glsl.
@@ -82,6 +84,8 @@ public sealed class DeepZoomPipeline : IDisposable
     private string _refRe = "", _refIm = "";
     private double _refRadius = double.NaN;
     private int _refP = -1;
+    private int _refFormula = -1;
+    private double _refKappaRe = double.NaN, _refKappaIm = double.NaN;
 
     public DeepZoomPipeline(Gl gl)
     {
@@ -128,13 +132,25 @@ public sealed class DeepZoomPipeline : IDisposable
         EnsureReference(view, interactive, effIter);  // (re)computes + uploads _refBuffer
         int P = view.PrecisionBits();
 
-        // Past the fp64 dz^2 underflow wall, run the floatexp delta pass instead.
-        // Same SSBOs and DeepParams -- only the program differs.
+        // Path selection by depth:
+        //   direct fp64 (shallow, radius > DirectRadius): iterate the pixel itself,
+        //     exact and the only reliable path for Burning Ship at wide views.
+        //   fp64 perturbation (mid): the validated dz pass.
+        //   floatexp perturbation (deep, past the dz^2 underflow wall).
+        // direct implies not-deep, so the floatexp program is only ever used with
+        // directMode == 0.
+        bool direct = view.UseDirectPath;
         bool deep = view.Radius < FloatExpRadius;
         ComputeShader deltaShader = deep ? _deltaShaderFe : _deltaShader;
         var (refDcRe, refDcIm) = BinaryFixed.OffsetToDouble(
             _refRe, _refIm, view.CenterRe, view.CenterIm, P);
         double spacing = view.SpacingFor(height);
+
+        // View center as a double for the direct path. Shallow only (where direct
+        // runs), so the center fits a double with room to spare; for the deeper
+        // perturbation paths this is unused.
+        double cdx = double.Parse(view.CenterRe, System.Globalization.CultureInfo.InvariantCulture);
+        double cdy = double.Parse(view.CenterIm, System.Globalization.CultureInfo.InvariantCulture);
 
         _muBuffer.Allocate(pixelCount);
         _accumBuffer.Allocate(pixelCount);
@@ -168,7 +184,8 @@ public sealed class DeepZoomPipeline : IDisposable
                 int rowCount = Math.Min(tileRows, height - rowOffset);
                 _deepParams.Upload(new[] { BuildDeepParams(
                     width, height, rowOffset, rowCount, _ref!.Count, shaderIter,
-                    refDcRe, refDcIm, spacing, 0.5 + jit.X, 0.5 + jit.Y) });
+                    refDcRe, refDcIm, spacing, 0.5 + jit.X, 0.5 + jit.Y, view.Formula,
+                    direct ? 1 : 0, view.KappaRe, view.KappaIm, cdx, cdy) });
                 _deepParams.BindBase(4);
                 deltaShader.Dispatch((width + 7) / 8, (rowCount + 7) / 8);
                 _gl.MemoryBarrier(GlConst.ShaderStorageBarrierBit);
@@ -207,11 +224,15 @@ public sealed class DeepZoomPipeline : IDisposable
         // precision margin), and the view snaps to a freshly computed reference
         // the instant zooming stops (interactive == false). Only a zoom deep
         // enough to exhaust that margin forces a recompute mid-gesture.
-        if (interactive && _ref != null && view.Radius >= _refRadius * ReuseRadiusFloor)
+        if (interactive && _ref != null && _refFormula == view.Formula
+            && _refKappaRe == view.KappaRe && _refKappaIm == view.KappaIm
+            && view.Radius >= _refRadius * ReuseRadiusFloor)
             return;
 
         int P = view.PrecisionBits();
-        bool need = _ref == null || view.Radius != _refRadius || P != _refP;
+        bool need = _ref == null || view.Radius != _refRadius || P != _refP
+                    || view.Formula != _refFormula
+                    || _refKappaRe != view.KappaRe || _refKappaIm != view.KappaIm;
         if (!need)
         {
             var (dx, dy) = BinaryFixed.OffsetToDouble(
@@ -221,25 +242,32 @@ public sealed class DeepZoomPipeline : IDisposable
         }
         if (need)
         {
-            _ref = ReferenceOrbit.Compute(view.CenterRe, view.CenterIm, P, iterations);
+            _ref = ReferenceOrbit.Compute(view.CenterRe, view.CenterIm, P, iterations,
+                                          view.Formula, view.KappaRe, view.KappaIm);
             _refRe = view.CenterRe; _refIm = view.CenterIm;
-            _refRadius = view.Radius; _refP = P;
+            _refRadius = view.Radius; _refP = P; _refFormula = view.Formula;
+            _refKappaRe = view.KappaRe; _refKappaIm = view.KappaIm;
             _refBuffer.Upload(_ref.ToInterleaved());
         }
     }
 
     private static DeepParamsGpu BuildDeepParams(
         int width, int height, int rowOffset, int rowCount, int refCount, int maxIter,
-        double refDcRe, double refDcIm, double spacing, double jitterX, double jitterY)
+        double refDcRe, double refDcIm, double spacing, double jitterX, double jitterY,
+        int formula, int directMode, double kappaRe, double kappaIm, double cdRe, double cdIm)
         => new DeepParamsGpu
         {
             Width = width, Height = height, RowOffset = rowOffset, RowCount = rowCount,
-            RefCount = refCount, MaxIter = maxIter, Pad0 = 0, Pad1 = 0,
+            RefCount = refCount, MaxIter = maxIter, Formula = formula, DirectMode = directMode,
             RefDcX = refDcRe, RefDcY = refDcIm,
             PixelDxX = spacing, PixelDxY = 0.0,
             PixelDyX = 0.0, PixelDyY = -spacing,
             JitterX = jitterX, JitterY = jitterY,
-            EscapeR2 = 4.0, Pad2 = 0.0,
+            KappaX = kappaRe, KappaY = kappaIm,
+            CdX = cdRe, CdY = cdIm,
+            // Mandelbrot/Julia/Burning Ship escape at |z|=2; the Prospector's
+            // bounded orbits reach |z|^2 ~ 53, so it needs a far larger radius.
+            EscapeR2 = formula == 1 ? 1.0e6 : 4.0, Pad2 = 0.0,
         };
 
     private static ColorParamsGpu BuildColorParams(

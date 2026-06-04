@@ -17,7 +17,7 @@ namespace Parsec.App;
 /// distance estimate at the camera so it feels right at every scale. Renders
 /// on change only — idle draws nothing.
 /// </summary>
-public enum FractalType { AmazingBox, Kifs, Kleinian, Attractor, Mandelbulb, QuaternionJulia, RotBox, Hybrid, QJBox, Menger, Bicomplex, Apollonian, Phoenix, Biomorph, Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, DeepZoom }
+public enum FractalType { AmazingBox, Mandelbox, Kifs, Kleinian, Attractor, Mandelbulb, QuaternionJulia, RotBox, Hybrid, QJBox, Menger, Bicomplex, Apollonian, Phoenix, Biomorph, Mosely, PseudoKleinian4D, RiemannSphere, Mandalay, Anisotropic, OrbitHybrid, BurningShip, DeepZoom }
 
 public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomHitTest
 {
@@ -41,6 +41,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private GpuPseudoKleinian4DRenderer? _pk4dRenderer;
     private GpuRiemannSphereRenderer? _riemannRenderer;
     private GpuMandalayRenderer? _mandalayRenderer;
+    private GpuAnisotropicRenderer? _anisoRenderer;
+    private GpuOrbitHybridRenderer? _orbitHybridRenderer;
+    private GpuBurningShipRenderer? _burningShipRenderer;
     private DeepZoomPipeline? _deepPipeline;
     private Parsec.Core.Attractors.AttractorHash? _attractorHash;
     private bool _attractorNeedsRegen = true;
@@ -51,6 +54,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     // Live fractal parameters, shared with the parameter panel.
     public AmazingBoxState Fractal { get; } = new();
+    public MandelboxState Mandelbox { get; } = new();
     public KifsState Kifs { get; } = new();
     public KleinianState Kleinian { get; } = new();
     public AttractorState Attractor { get; } = new();
@@ -68,6 +72,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     public PseudoKleinian4DState PseudoKleinian4D { get; } = new();
     public RiemannSphereState RiemannSphere { get; } = new();
     public MandalayState Mandalay { get; } = new();
+    public AnisotropicState Anisotropic { get; } = new();
+    public OrbitHybridState OrbitHybrid { get; } = new();
+    public BurningShipState BurningShip { get; } = new();
 
     /// <summary>Orbit-trap palette, shared across all fractals.</summary>
     public PaletteState Palette { get; } = new();
@@ -101,14 +108,31 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         // 3D reflection/light. Expose the shared palette only (pan/zoom drive the
         // view via the mouse).
         if (ActiveType == FractalType.DeepZoom)
-            return new ParamSchema
+        {
+            // Formula is chosen by the FORMULA dropdown (see SetDeepFormula), not a
+            // slider. The panel exposes the palette plus the Julia constant kappa --
+            // keyframeable, so a kappa sweep morphs the Julia set in an animation.
+            var deepParams = new List<ParamDescriptor>
             {
-                Parameters = new List<ParamDescriptor>(Palette.BuildSchema().Parameters)
+                new ParamDescriptor {
+                    Label = "kappa re (Julia)", Group = "Julia",
+                    Min = -2.0, Max = 2.0, Step = 0.0001, Decimals = 4,
+                    Get = () => _deepView.KappaRe,
+                    Set = v => _deepView.KappaRe = v },
+                new ParamDescriptor {
+                    Label = "kappa im (Julia)", Group = "Julia",
+                    Min = -2.0, Max = 2.0, Step = 0.0001, Decimals = 4,
+                    Get = () => _deepView.KappaIm,
+                    Set = v => _deepView.KappaIm = v },
             };
+            deepParams.AddRange(Palette.BuildSchema().Parameters);
+            return new ParamSchema { Parameters = deepParams };
+        }
 
         var fractalSchema = ActiveType switch
         {
             FractalType.AmazingBox => Fractal.BuildSchema(),
+            FractalType.Mandelbox => Mandelbox.BuildSchema(),
             FractalType.Kifs => Kifs.BuildSchema(),
             FractalType.Kleinian => Kleinian.BuildSchema(),
             FractalType.Attractor => Attractor.BuildSchema(),
@@ -126,6 +150,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             FractalType.PseudoKleinian4D => PseudoKleinian4D.BuildSchema(),
             FractalType.RiemannSphere => RiemannSphere.BuildSchema(),
             FractalType.Mandalay => Mandalay.BuildSchema(),
+            FractalType.Anisotropic => Anisotropic.BuildSchema(),
+            FractalType.OrbitHybrid => OrbitHybrid.BuildSchema(),
+            FractalType.BurningShip => BurningShip.BuildSchema(),
             _ => Kifs.BuildSchema(),
         };
         var combined = new List<ParamDescriptor>(fractalSchema.Parameters);
@@ -228,6 +255,22 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     // 2D deep-zoom "camera": high-precision center + radius (see DeepZoomView).
     private readonly DeepZoomView _deepView = new();
+
+    /// <summary>Current deep-zoom formula (0 Mandelbrot, 1 Prospector, 2 Julia,
+    /// 3 Burning Ship). Driven by the FORMULA dropdown in the main window.</summary>
+    public int DeepFormula => _deepView.Formula;
+
+    /// <summary>Switch the deep-zoom formula and reframe to its home view. The
+    /// formula is a mode (not a keyframeable slider), so this lives outside the
+    /// parameter schema; changing it reframes and triggers a redraw.</summary>
+    public void SetDeepFormula(int formula)
+    {
+        if (formula == _deepView.Formula) return;
+        _deepView.Formula = formula;
+        _deepView.ApplyFormulaHome();
+        MarkDirty();
+    }
+
     private readonly HashSet<Key> _keysDown = new();
     private bool _looking;
     private Point _lastPointer;
@@ -443,6 +486,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 FractalType.PseudoKleinian4D => 1.0f,
             FractalType.RiemannSphere => 1.0f,
             FractalType.Mandalay => 1.0f,
+            FractalType.Anisotropic => 1.0f,
+            FractalType.OrbitHybrid => 1.0f,
+            FractalType.BurningShip => 1.0f,
+                FractalType.Mandelbox => MandelboxDE.Estimate(_cam.Position, Mandelbox.ToParams()),
                 _ => MandelboxDE.Estimate(_cam.Position, Fractal.ToParams()),
             };
             float speed = BaseMoveSpeed * Math.Clamp(de, 0.02f, 4.0f);
@@ -479,6 +526,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             _pk4dRenderer = new GpuPseudoKleinian4DRenderer(_gl, _pipeline);
             _riemannRenderer = new GpuRiemannSphereRenderer(_gl, _pipeline);
             _mandalayRenderer = new GpuMandalayRenderer(_gl, _pipeline);
+            _anisoRenderer = new GpuAnisotropicRenderer(_gl, _pipeline);
+            _orbitHybridRenderer = new GpuOrbitHybridRenderer(_gl, _pipeline);
+            _burningShipRenderer = new GpuBurningShipRenderer(_gl, _pipeline);
             _deepPipeline = new DeepZoomPipeline(_gl);
 
             _texture = _gl.GenTexture();
@@ -503,7 +553,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
     protected override void OnOpenGlRender(GlInterface gl, int fb)
     {
-        if (!_ready || _gl == null || _pipeline == null || _boxRenderer == null || _kifsRenderer == null || _kleinianRenderer == null || _attractorRenderer == null || _mandelbulbRenderer == null || _qjuliaRenderer == null || _rotboxRenderer == null || _hybridRenderer == null || _qjboxRenderer == null || _mengerRenderer == null || _bicomplexRenderer == null || _apollonianRenderer == null || _phoenixRenderer == null || _biomorphRenderer == null || _moselyRenderer == null || _pk4dRenderer == null || _riemannRenderer == null || _mandalayRenderer == null || _deepPipeline == null)
+        if (!_ready || _gl == null || _pipeline == null || _boxRenderer == null || _kifsRenderer == null || _kleinianRenderer == null || _attractorRenderer == null || _mandelbulbRenderer == null || _qjuliaRenderer == null || _rotboxRenderer == null || _hybridRenderer == null || _qjboxRenderer == null || _mengerRenderer == null || _bicomplexRenderer == null || _apollonianRenderer == null || _phoenixRenderer == null || _biomorphRenderer == null || _moselyRenderer == null || _pk4dRenderer == null || _riemannRenderer == null || _mandalayRenderer == null || _anisoRenderer == null || _orbitHybridRenderer == null || _burningShipRenderer == null || _deepPipeline == null)
         {
             _gl?.BindFramebuffer(GlConst.Framebuffer, (uint)fb);
             _gl?.ClearColor(0.1f, 0.1f, 0.1f, 1f);
@@ -664,6 +714,13 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.BurningShip => _burningShipRenderer.RenderToBuffer(BurningShip.ToParams(), camera,
+                    PreviewWidth, PreviewHeight, PreviewSettings(),
+                    background: new Color(0.02f, 0.03f, 0.07f),
+                    surface: Color.Rgb(225, 140, 90),
+                    lightDirection: Light.ToDirection(),
+                    palette: Palette.ToParams(),
+                    tileRows: 64),
                 FractalType.QuaternionJulia => _qjuliaRenderer.RenderToBuffer(QuaternionJulia.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -776,6 +833,27 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                     lightDirection: Light.ToDirection(),
                     palette: Palette.ToParams(),
                     tileRows: 64),
+                FractalType.Anisotropic => _anisoRenderer.RenderToBuffer(Anisotropic.ToParams(), camera,
+                    PreviewWidth, PreviewHeight, PreviewSettings(),
+                    background: new Color(0.02f, 0.03f, 0.07f),
+                    surface: Color.Rgb(160, 158, 170),
+                    lightDirection: Light.ToDirection(),
+                    palette: Palette.ToParams(),
+                    tileRows: 64),
+                FractalType.OrbitHybrid => _orbitHybridRenderer.RenderToBuffer(OrbitHybrid.ToParams(), camera,
+                    PreviewWidth, PreviewHeight, PreviewSettings(),
+                    background: new Color(0.02f, 0.03f, 0.07f),
+                    surface: Color.Rgb(195, 170, 135),
+                    lightDirection: Light.ToDirection(),
+                    palette: Palette.ToParams(),
+                    tileRows: 64),
+                FractalType.Mandelbox => _boxRenderer.RenderToBuffer(Mandelbox.ToParams(), camera,
+                    PreviewWidth, PreviewHeight, PreviewSettings(),
+                    background: new Color(0.02f, 0.03f, 0.07f),
+                    surface: Color.Rgb(170, 150, 130),
+                    lightDirection: Light.ToDirection(),
+                    palette: Palette.ToParams(),
+                    tileRows: 64),
                 _ => _boxRenderer.RenderToBuffer(Fractal.ToParams(), camera,
                     PreviewWidth, PreviewHeight, PreviewSettings(),
                     background: new Color(0.02f, 0.03f, 0.07f),
@@ -800,7 +878,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             Status(ActiveType == FractalType.DeepZoom
-                ? $"deep zoom · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
+                ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
         }
 
@@ -869,6 +947,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _pk4dRenderer?.Dispose();
         _riemannRenderer?.Dispose();
         _mandalayRenderer?.Dispose();
+        _anisoRenderer?.Dispose();
+        _orbitHybridRenderer?.Dispose();
+        _burningShipRenderer?.Dispose();
         _deepPipeline?.Dispose();
         _pipeline?.Dispose();
         _texture = _vao = _blitProgram = 0;
@@ -890,6 +971,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         _pk4dRenderer = null;
         _riemannRenderer = null;
         _mandalayRenderer = null;
+        _anisoRenderer = null;
+        _orbitHybridRenderer = null;
+        _burningShipRenderer = null;
         _deepPipeline = null;
         _pipeline = null;
         _gl = null;
@@ -934,6 +1018,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             FractalType.DeepZoom => DeepZoomBitmap(width, height),
             FractalType.Mandelbulb => _mandelbulbRenderer!.Render(Mandelbulb.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(210, 175, 140), light, pal, tileRows: 32),
+            FractalType.BurningShip => _burningShipRenderer!.Render(BurningShip.ToParams(), cam,
+                width, height, HeroSettings(), bg, Color.Rgb(225, 140, 90), light, pal, tileRows: 32),
             FractalType.QuaternionJulia => _qjuliaRenderer!.Render(QuaternionJulia.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(210, 180, 150), light, pal, tileRows: 32),
             FractalType.RotBox => _rotboxRenderer!.Render(RotBox.ToParams(), cam,
@@ -966,6 +1052,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
                 width, height, HeroSettings(1.5e-3f), bg, Color.Rgb(205, 160, 135), light, pal, tileRows: 32),
             FractalType.Mandalay => _mandalayRenderer!.Render(Mandalay.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(175, 165, 150), light, pal, tileRows: 32),
+            FractalType.Anisotropic => _anisoRenderer!.Render(Anisotropic.ToParams(), cam,
+                width, height, HeroSettings(), bg, Color.Rgb(160, 158, 170), light, pal, tileRows: 32),
+            FractalType.OrbitHybrid => _orbitHybridRenderer!.Render(OrbitHybrid.ToParams(), cam,
+                width, height, HeroSettings(), bg, Color.Rgb(195, 170, 135), light, pal, tileRows: 32),
+            FractalType.Mandelbox => _boxRenderer!.Render(Mandelbox.ToParams(), cam,
+                width, height, HeroSettings(), bg, Color.Rgb(170, 150, 130), light, pal, tileRows: 32),
             _ => _boxRenderer!.Render(Fractal.ToParams(), cam,
                 width, height, HeroSettings(), bg, Color.Rgb(150, 125, 100), light, pal, tileRows: 32),
         };

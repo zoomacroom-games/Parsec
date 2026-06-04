@@ -51,6 +51,9 @@
     <EmbeddedResource Include="Shaders\pseudokleinian_core.glsl" />
     <EmbeddedResource Include="Shaders\riemann_sphere_core.glsl" />
     <EmbeddedResource Include="Shaders\mandalay_core.glsl" />
+    <EmbeddedResource Include="Shaders\anisotropic_core.glsl" />
+    <EmbeddedResource Include="Shaders\orbithybrid_core.glsl" />
+    <EmbeddedResource Include="Shaders\burningship_core.glsl" />
   </ItemGroup>
 
 </Project>

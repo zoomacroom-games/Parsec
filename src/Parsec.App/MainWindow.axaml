@@ -23,6 +23,7 @@
         <ComboBox Name="FractalSelector" HorizontalAlignment="Stretch">
           <ComboBoxItem>Amazing IFS (KIFS)</ComboBoxItem>
           <ComboBoxItem>AmazingBox</ComboBoxItem>
+          <ComboBoxItem>Mandelbox</ComboBoxItem>
           <ComboBoxItem>Pseudo-Kleinian</ComboBoxItem>
           <ComboBoxItem>Pseudo-Kleinian 4D</ComboBoxItem>
           <ComboBoxItem>Thomas Attractor</ComboBoxItem>
@@ -39,7 +40,19 @@
           <ComboBoxItem>Mosely Snowflake</ComboBoxItem>
           <ComboBoxItem>Riemann Sphere</ComboBoxItem>
           <ComboBoxItem>Mandalay Fold</ComboBoxItem>
-          <ComboBoxItem>Deep Mandelbrot (2D)</ComboBoxItem>
+          <ComboBoxItem>Anisotropic Fold</ComboBoxItem>
+          <ComboBoxItem>Orbit Hybrid (KIFS+Mbox)</ComboBoxItem>
+          <ComboBoxItem>3D Burning Ship</ComboBoxItem>
+          <ComboBoxItem>Deep Zoom 2D</ComboBoxItem>
+        </ComboBox>
+        <TextBlock Name="FormulaLabel" Text="FORMULA" Foreground="#9a9ab0" FontSize="11"
+                   FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="False" />
+        <ComboBox Name="FormulaSelector" HorizontalAlignment="Stretch"
+                  SelectedIndex="0" IsVisible="False">
+          <ComboBoxItem>Mandelbrot</ComboBoxItem>
+          <ComboBoxItem>Prospector</ComboBoxItem>
+          <ComboBoxItem>Julia</ComboBoxItem>
+          <ComboBoxItem>Burning Ship</ComboBoxItem>
         </ComboBox>
         <Button Name="GenerateButton" HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Center" Margin="0,8,0,0"

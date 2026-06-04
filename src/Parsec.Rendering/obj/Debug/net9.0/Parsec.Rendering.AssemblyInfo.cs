@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Parsec.Rendering")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2e5186fdf20fc86ba3a05d3ed4681caeca72bc35")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+308cdac4d73e3a04d0fc05c4309c783896b8ee53")]
 [assembly: System.Reflection.AssemblyProductAttribute("Parsec.Rendering")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Parsec.Rendering")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

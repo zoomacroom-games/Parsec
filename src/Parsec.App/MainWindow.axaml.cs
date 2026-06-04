@@ -49,6 +49,16 @@ public partial class MainWindow : Window
         if (heroButton != null)
             heroButton.Click += OnHeroClick;
 
+        var formulaSelector = this.FindControl<ComboBox>("FormulaSelector");
+        if (formulaSelector != null)
+            formulaSelector.SelectionChanged += (_, _) =>
+            {
+                // Dropdown index == formula int (Mandelbrot 0, Prospector 1,
+                // Julia 2, Burning Ship 3).
+                if (_view != null && formulaSelector.SelectedIndex >= 0)
+                    _view.SetDeepFormula(formulaSelector.SelectedIndex);
+            };
+
         var heroSamplesSelector = this.FindControl<ComboBox>("HeroSamplesSelector");
         if (heroSamplesSelector != null)
             heroSamplesSelector.SelectionChanged += (_, _) =>
@@ -123,7 +133,11 @@ public partial class MainWindow : Window
             FractalType.PseudoKleinian4D => "pk4d",
             FractalType.RiemannSphere => "riemann",
             FractalType.Mandalay => "mandalay",
+            FractalType.Anisotropic => "anisotropic",
+            FractalType.OrbitHybrid => "orbithybrid",
+            FractalType.BurningShip => "burningship",
             FractalType.AmazingBox => "amazingbox",
+            FractalType.Mandelbox => "mandelbox",
             FractalType.Attractor => "thomas",
             FractalType.Mandelbulb => "mandelbulb",
             FractalType.QuaternionJulia => "qjulia",
@@ -163,28 +177,43 @@ public partial class MainWindow : Window
         var type = cb.SelectedIndex switch
         {
             1 => FractalType.AmazingBox,
-            2 => FractalType.Kleinian,
-            3 => FractalType.PseudoKleinian4D,
-            4 => FractalType.Attractor,
-            5 => FractalType.Mandelbulb,
-            6 => FractalType.QuaternionJulia,
-            7 => FractalType.RotBox,
-            8 => FractalType.Hybrid,
-            9 => FractalType.QJBox,
-            10 => FractalType.Menger,
-            11 => FractalType.Bicomplex,
-            12 => FractalType.Apollonian,
-            13 => FractalType.Phoenix,
-            14 => FractalType.Biomorph,
-            15 => FractalType.Mosely,
-            16 => FractalType.RiemannSphere,
-            17 => FractalType.Mandalay,
-            18 => FractalType.DeepZoom,
+            2 => FractalType.Mandelbox,
+            3 => FractalType.Kleinian,
+            4 => FractalType.PseudoKleinian4D,
+            5 => FractalType.Attractor,
+            6 => FractalType.Mandelbulb,
+            7 => FractalType.QuaternionJulia,
+            8 => FractalType.RotBox,
+            9 => FractalType.Hybrid,
+            10 => FractalType.QJBox,
+            11 => FractalType.Menger,
+            12 => FractalType.Bicomplex,
+            13 => FractalType.Apollonian,
+            14 => FractalType.Phoenix,
+            15 => FractalType.Biomorph,
+            16 => FractalType.Mosely,
+            17 => FractalType.RiemannSphere,
+            18 => FractalType.Mandalay,
+            19 => FractalType.Anisotropic,
+            20 => FractalType.OrbitHybrid,
+            21 => FractalType.BurningShip,
+            22 => FractalType.DeepZoom,
             _ => FractalType.Kifs,
         };
         _view.SetActiveType(type);
         if (_generateButton != null)
             _generateButton.IsVisible = type == FractalType.Attractor;
+
+        // The FORMULA dropdown belongs to the Deep Zoom 2D chapter only.
+        bool deep = type == FractalType.DeepZoom;
+        var formulaSelector = this.FindControl<ComboBox>("FormulaSelector");
+        var formulaLabel = this.FindControl<TextBlock>("FormulaLabel");
+        if (formulaSelector != null)
+        {
+            formulaSelector.IsVisible = deep;
+            if (deep) formulaSelector.SelectedIndex = _view.DeepFormula;   // index == formula
+        }
+        if (formulaLabel != null) formulaLabel.IsVisible = deep;
 
         RebuildForActiveFractal();   // keyframes are per-fractal; reset on switch
     }

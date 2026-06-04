@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROSPECTOR — escape-time field survey</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0a0d; --bg2:#111118; --ink:#e9e6df; --dim:#8a8676;
+    --line:#26262f; --orange:#e8923c; --blue:#7fb0d4; --cream:#f3e2c2;
+    --reject:#3a2420;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 78% -10%, #1a160f 0%, transparent 55%),
+      radial-gradient(900px 600px at -5% 110%, #0e1620 0%, transparent 50%),
+      var(--bg);
+    color:var(--ink); font-family:"Space Mono",monospace; font-size:13px;
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  .wrap{display:grid; grid-template-columns: 1fr 360px; grid-template-rows:auto 1fr;
+        height:100vh; gap:0;}
+  header{grid-column:1 / -1; display:flex; align-items:baseline; gap:22px;
+         padding:18px 26px 14px; border-bottom:1px solid var(--line);
+         background:linear-gradient(180deg,rgba(20,18,14,.6),transparent);}
+  h1{font-family:"Fraunces",serif; font-weight:900; font-size:30px; letter-spacing:.5px;
+     margin:0; color:var(--cream);}
+  h1 .acc{color:var(--orange)}
+  .tag{font-size:11px; color:var(--dim); letter-spacing:2.5px; text-transform:uppercase;
+       align-self:center;}
+  .controls{margin-left:auto; display:flex; align-items:center; gap:18px;}
+  button.prospect{
+    font-family:"Space Mono",monospace; font-weight:700; font-size:13px; letter-spacing:2px;
+    color:var(--bg); background:var(--orange); border:none; padding:11px 22px;
+    cursor:pointer; text-transform:uppercase; transition:transform .12s, background .2s;
+    clip-path:polygon(0 0,100% 0,100% 70%,94% 100%,0 100%);
+  }
+  button.prospect:hover{background:var(--cream); transform:translateY(-1px)}
+  button.prospect:disabled{background:#5a4a36; color:#9a8e78; cursor:wait}
+  .ctl{display:flex; align-items:center; gap:8px; color:var(--dim); font-size:11px;
+       letter-spacing:1px; text-transform:uppercase;}
+  .ctl input[type=range]{width:84px; accent-color:var(--blue)}
+  .ctl label{cursor:pointer}
+  .stat{font-size:11px; color:var(--dim); letter-spacing:1px; min-width:160px;}
+  .stat b{color:var(--blue); font-weight:700}
+
+  .gridwrap{overflow:auto; padding:22px 26px;}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(168px,1fr)); gap:14px;}
+  .cell{position:relative; background:#000; border:1px solid var(--line); cursor:pointer;
+        aspect-ratio:1/1; overflow:hidden; transition:border-color .15s, transform .15s;}
+  .cell:hover{border-color:var(--orange); transform:scale(1.012)}
+  .cell.sel{border-color:var(--cream); box-shadow:0 0 0 1px var(--cream)}
+  .cell canvas{width:100%; height:100%; display:block; image-rendering:auto;}
+  .cell .meta{position:absolute; left:0; right:0; bottom:0; padding:4px 7px;
+        font-size:10px; letter-spacing:.5px; color:var(--ink);
+        background:linear-gradient(0deg,rgba(0,0,0,.82),transparent); display:flex; justify-content:space-between;}
+  .badge{font-weight:700}
+  .badge.P{color:var(--orange)} .badge.J{color:var(--blue)}
+  .conf{color:var(--dim)}
+  .empty{color:var(--dim); padding:60px 10px; text-align:center; line-height:1.7; font-size:12px;}
+
+  aside{border-left:1px solid var(--line); background:linear-gradient(180deg,var(--bg2),var(--bg));
+        padding:20px 20px 26px; overflow:auto; display:flex; flex-direction:column; gap:14px;}
+  aside h2{font-family:"Fraunces",serif; font-weight:600; font-size:15px; color:var(--cream);
+           margin:0; letter-spacing:.3px;}
+  .bigcanvas{width:100%; aspect-ratio:1/1; background:#000; border:1px solid var(--line);}
+  .readout{font-size:12px; line-height:1.65; white-space:pre-wrap; color:var(--ink);
+           background:#07070a; border:1px solid var(--line); padding:12px 13px;}
+  .readout .k{color:var(--dim)} .readout .v{color:var(--blue)} .readout .o{color:var(--orange)}
+  .pill{display:inline-block; font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
+        padding:2px 8px; border:1px solid var(--line);}
+  .pill.conf{color:var(--cream); border-color:var(--cream)}
+  .pill.non{color:var(--orange); border-color:var(--orange)}
+  .hint{color:var(--dim); font-size:11px; line-height:1.6;}
+  .row{display:flex; gap:8px; align-items:center}
+  .copybtn{font-family:"Space Mono",monospace; font-size:10px; letter-spacing:1.5px;
+        text-transform:uppercase; color:var(--blue); background:transparent;
+        border:1px solid var(--line); padding:6px 10px; cursor:pointer;}
+  .copybtn:hover{border-color:var(--blue)}
+  ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#222} ::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PRO<span class="acc">·</span>SPECTOR</h1>
+    <span class="tag">escape-time field survey</span>
+    <div class="controls">
+      <div class="ctl"><label for="julia"><input type="checkbox" id="julia" checked> dynamical&nbsp;plane</label></div>
+      <div class="ctl">batch <input type="range" id="batch" min="6" max="24" value="12"><span id="batchN">12</span></div>
+      <div class="stat" id="stat">idle</div>
+      <button class="prospect" id="go">Prospect</button>
+    </div>
+  </header>
+
+  <div class="gridwrap">
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty">No survivors yet. Hit <b>Prospect</b> to draw a batch of random quadratic maps,<br>cull the degenerate ones, and frame what survives.</div>
+  </div>
+
+  <aside>
+    <h2>Readout</h2>
+    <canvas class="bigcanvas" id="big" width="1024" height="1024"></canvas>
+    <div class="row"><span id="classpill" class="pill">—</span><button class="copybtn" id="copy">copy params</button></div>
+    <div class="readout" id="readout">Select a survivor to see the <span class="o">DeepZoomView</span> + coefficient fields a pick would populate.</div>
+    <div class="hint">A pick emits exactly these fields: the high-precision <b>CenterRe/Im</b> and <b>Radius</b> become the deep-zoom view; <b>plane</b> + the 10 quadratic coefficients (and <b>κ</b> in dynamical mode) feed the generalized reference orbit and delta shaders. The triage gate and auto-framer here are the validated Python logic, ported 1:1 — this is the C# <i>Prospector</i> frontend in miniature.</div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+// ---------- generalized real-quadratic iterator ----------
+// coeffs c = [a1,a2,a3,a4,a5, b1,b2,b3,b4,b5]
+//   x' = kx + a1 x + a2 y + a3 x^2 + a4 xy + a5 y^2
+//   y' = ky + b1 x + b2 y + b3 x^2 + b4 xy + b5 y^2
+// mode 'param': pixel=(kx,ky), seed origin  (Mandelbrot-type / parameter plane)
+// mode 'julia': pixel=seed,    (kx,ky)=kappa (dynamical plane)
+const ESC2 = 1e4;                                  // escape |z|^2 (bounded orbits stay < ~53)
+function dwellAt(px,py,c,mode,kap,maxit){
+  const a1=c[0],a2=c[1],a3=c[2],a4=c[3],a5=c[4],b1=c[5],b2=c[6],b3=c[7],b4=c[8],b5=c[9];
+  let x,y,kx,ky;
+  if(mode==='param'){ kx=px; ky=py; x=0; y=0; } else { kx=kap[0]; ky=kap[1]; x=px; y=py; }
+  for(let i=0;i<maxit;i++){
+    const xn=kx+a1*x+a2*y+a3*x*x+a4*x*y+a5*y*y;
+    const yn=ky+b1*x+b2*y+b3*x*x+b4*x*y+b5*y*y;
+    x=xn; y=yn; const m2=x*x+y*y;
+    if(m2>ESC2) return i+1-Math.log(Math.log(Math.sqrt(m2)))/Math.LN2;
+    if(!isFinite(m2)) return i;                    // blew up hard
+  }
+  return maxit;                                    // bounded sentinel
+}
+
+// ---------- stage 1: triage gate + halo frame (validated logic) ----------
+function gateFrame(c,mode,kap){
+  const cmax = mode==='param'?4.0:2.5, N=60, maxit=80;
+  let bounded=0, slow=0, minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(let j=0;j<N;j++) for(let i=0;i<N;i++){
+    const px=-cmax+2*cmax*i/(N-1), py=-cmax+2*cmax*j/(N-1);
+    const d=dwellAt(px,py,c,mode,kap,maxit);
+    if(d>=maxit) bounded++;
+    if(d>0.4*maxit){ slow++; if(px<minx)minx=px; if(px>maxx)maxx=px; if(py<miny)miny=py; if(py>maxy)maxy=py; }
+  }
+  const bfrac=bounded/(N*N);
+  if(slow<25) return null;            // all fast-escape: no structure
+  if(bfrac>0.90) return null;         // global contraction / solid blob
+  const rx=(maxx-minx)/2, ry=(maxy-miny)/2, r=Math.max(rx,ry)*1.2+1e-3;
+  if(r<0.01) return null;             // degenerate point
+  return { cx:(minx+maxx)/2, cy:(miny+maxy)/2, radius:r, bfrac };
+}
+
+// ---------- stage 2: colored thumbnail ----------
+function renderInto(canvas,c,mode,kap,frame,maxit){
+  const S=canvas.width, ctx=canvas.getContext('2d'), img=ctx.createImageData(S,S);
+  const {cx,cy,radius}=frame; const d=new Float32Array(S*S);
+  let lo=1e30, hi=-1e30;
+  for(let j=0;j<S;j++) for(let i=0;i<S;i++){
+    const px=cx-radius+2*radius*i/(S-1), py=cy+radius-2*radius*j/(S-1);
+    const v=dwellAt(px,py,c,mode,kap,maxit); d[j*S+i]=v;
+    if(v<maxit){ if(v<lo)lo=v; if(v>hi)hi=v; }
+  }
+  const span=(hi-lo)||1;
+  for(let p=0;p<S*S;p++){
+    const v=d[p]; const o=p*4;
+    if(v>=maxit){ img.data[o]=6; img.data[o+1]=6; img.data[o+2]=14; }
+    else{ const t=(v-lo)/span;                       // cosine palette -> orange/cream/blue
+      img.data[o]  =255*clip(.55+.48*Math.cos(6.2832*(1.4*t)+0.10));
+      img.data[o+1]=255*clip(.50+.45*Math.cos(6.2832*(1.4*t)+0.70));
+      img.data[o+2]=255*clip(.52+.50*Math.cos(6.2832*(1.4*t)+1.45)); }
+    img.data[o+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+}
+const clip=x=>x<0?0:x>1?1:x;
+
+// ---------- sampler (biased toward simple values; some near-holomorphic) ----------
+const SIMPLE=[-3,-2,-1,-0.5,-0.25,0.25,0.5,1,2,3];
+const coef=()=> Math.random()<0.45 ? 0 : SIMPLE[(Math.random()*SIMPLE.length)|0];
+function sample(allowJulia){
+  let c;
+  if(Math.random()<0.22){                            // near-holomorphic z^2 family -> classics appear
+    const s=[0.5,1,1][(Math.random()*3)|0];
+    c=[0,0,s,0,-s, 0,0,0,2*s,0];
+  } else {
+    c=[coef()*0.5,coef()*0.5,coef(),coef(),coef(), coef()*0.5,coef()*0.5,coef(),coef(),coef()];
+  }
+  const mode=(allowJulia && Math.random()<0.4)?'julia':'param';
+  const kap = mode==='julia' ? [Math.random()*2-1, Math.random()*2-1] : null;
+  return {c,mode,kap};
+}
+
+// conformal (Cauchy-Riemann) residual: small => Mandelbrot/Julia family
+function crResidual(c){
+  const [a1,a2,a3,a4,a5,b1,b2,b3,b4,b5]=c;
+  return Math.abs(b4-2*a3)+Math.abs(a4-2*b5)+Math.abs(b3+b5)+Math.abs(a5+a3)
+       + Math.abs(a1-b2)+Math.abs(a2+b1);
+}
+
+// ---------- orchestration ----------
+const grid=document.getElementById('grid'), emptyMsg=document.getElementById('empty');
+const stat=document.getElementById('stat'), go=document.getElementById('go');
+let survivors=[], selected=-1;
+const fmt=(n,p=6)=>{ let s=n.toFixed(p); return s; };
+
+async function prospect(){
+  go.disabled=true; emptyMsg.style.display='none'; grid.innerHTML=''; survivors=[];
+  const want=+document.getElementById('batch').value;
+  const allowJulia=document.getElementById('julia').checked;
+  const MAXTRIES=600; let tries=0;
+  while(survivors.length<want && tries<MAXTRIES){
+    tries++;
+    const cand=sample(allowJulia);
+    const frame=gateFrame(cand.c,cand.mode,cand.kap);
+    if(frame){ const s={...cand, frame, idx:survivors.length}; survivors.push(s); addCell(s); }
+    if(tries%14===0){ stat.innerHTML=`drew <b>${tries}</b> · kept <b>${survivors.length}</b>/${want}`; await new Promise(r=>setTimeout(r)); }
+  }
+  const rate=(100*survivors.length/Math.max(tries,1)).toFixed(0);
+  stat.innerHTML=`drew <b>${tries}</b> · kept <b>${survivors.length}</b> · survival <b>${rate}%</b>`;
+  go.disabled=false;
+  if(survivors.length) select(0);
+}
+
+function addCell(s){
+  const cell=document.createElement('div'); cell.className='cell'; cell.dataset.i=s.idx;
+  const cv=document.createElement('canvas'); cv.width=cv.height=168; cell.appendChild(cv);
+  const conf = crResidual(s.c)<0.05;
+  const meta=document.createElement('div'); meta.className='meta';
+  meta.innerHTML=`<span class="badge ${s.mode==='param'?'P':'J'}">${s.mode==='param'?'PARAM':'JULIA'}</span>`
+               + `<span class="conf">${conf?'conformal':'non-conf'}</span>`;
+  cell.appendChild(meta);
+  cell.addEventListener('click',()=>select(s.idx));
+  grid.appendChild(cell);
+  renderInto(cv,s.c,s.mode,s.kap,s.frame,220);
+}
+
+function select(i){
+  selected=i; const s=survivors[i];
+  [...grid.children].forEach((c,k)=>c.classList.toggle('sel',k===i));
+  renderInto(document.getElementById('big'),s.c,s.mode,s.kap,s.frame,1024);
+  const conf=crResidual(s.c)<0.05;
+  const pill=document.getElementById('classpill');
+  pill.textContent=conf?'conformal · Mandelbrot/Julia family':'non-conformal';
+  pill.className='pill '+(conf?'conf':'non');
+  const a=s.c.slice(0,5), b=s.c.slice(5,10);
+  const plane = s.mode==='param' ? 'parameter (pixel = c, seed = 0)' : 'dynamical (pixel = seed, κ fixed)';
+  let txt =
+`<span class="k">// DeepZoomView</span>
+CenterRe = <span class="v">"${fmt(s.frame.cx,12)}"</span>
+CenterIm = <span class="v">"${fmt(s.frame.cy,12)}"</span>
+Radius   = <span class="v">${s.frame.radius.toPrecision(6)}</span>
+plane    = <span class="o">${plane}</span>
+`;
+  if(s.mode==='julia') txt+=`kappa    = <span class="v">[${fmt(s.kap[0],6)}, ${fmt(s.kap[1],6)}]</span>\n`;
+  txt+=
+`<span class="k">// generalized quadratic coefficients</span>
+a[1..5]  = [${a.map(x=>fmt(x,3)).join(', ')}]
+b[1..5]  = [${b.map(x=>fmt(x,3)).join(', ')}]`;
+  document.getElementById('readout').innerHTML=txt;
+}
+
+document.getElementById('copy').addEventListener('click',()=>{
+  if(selected<0) return; const s=survivors[selected];
+  const obj={ centerRe:fmt(s.frame.cx,12), centerIm:fmt(s.frame.cy,12), radius:s.frame.radius,
+    plane:s.mode, kappa:s.kap, a:s.c.slice(0,5), b:s.c.slice(5,10) };
+  navigator.clipboard?.writeText(JSON.stringify(obj,null,2));
+  const btn=document.getElementById('copy'); const t=btn.textContent; btn.textContent='copied'; setTimeout(()=>btn.textContent=t,900);
+});
+document.getElementById('batch').addEventListener('input',e=>document.getElementById('batchN').textContent=e.target.value);
+go.addEventListener('click',prospect);
+prospect();   // seed an initial batch
+</script>
+</body>
+</html>

@@ -22,6 +22,34 @@ public sealed class DeepZoomView
     /// effective cap scales above this with depth -- see IterationsForDepth().</summary>
     public int MaxIterations { get; set; } = 2000;
 
+    /// <summary>Which 2D escape-time formula the deep-zoom pipeline runs.
+    /// 0 = Mandelbrot (Z^2+C), 1 = Prospector real-2D map, 2 = Julia (Z^2+kappa,
+    /// dynamical plane), 3 = Burning Ship. Serialized with the view so zoom-video
+    /// keyframes capture it.</summary>
+    public int Formula { get; set; } = 0;
+
+    /// <summary>Julia constant kappa (formula 2 only). The dynamical plane fixes
+    /// kappa and lets the pixel be the seed; these are O(1) so doubles are plenty
+    /// (the high-precision quantity is the zoom CENTER, i.e. the seed, not kappa).
+    /// Keyframeable -- sweeping kappa morphs the Julia set for animations.</summary>
+    public double KappaRe { get; set; } = -0.8;
+    public double KappaIm { get; set; } = 0.156;
+
+    /// <summary>Reset the center/radius to a sensible whole-set home for the
+    /// current <see cref="Formula"/>. Called when the formula is switched, since
+    /// each set lives in a different region (the Mandelbrot home shows nothing of
+    /// the Burning Ship, etc.). Leaves kappa untouched -- that is the user's dial.</summary>
+    public void ApplyFormulaHome()
+    {
+        switch (Formula)
+        {
+            case 1: CenterRe = "0.0";  CenterIm = "0.0";  Radius = 2.5; break;  // Prospector
+            case 2: CenterRe = "0.0";  CenterIm = "0.0";  Radius = 1.5; break;  // Julia (seed plane)
+            case 3: CenterRe = "-0.5"; CenterIm = "-0.5"; Radius = 1.5; break;  // Burning Ship
+            default: CenterRe = "-0.5"; CenterIm = "0.0"; Radius = 1.5; break;  // Mandelbrot
+        }
+    }
+
     /// <summary>Iteration cap scaled with zoom depth. Boundary dwell times grow
     /// with the number of e-foldings, so a fixed cap starves detail past ~1e-15
     /// (filaments that need thousands of iterations get tagged in-set). This
@@ -48,6 +76,18 @@ public sealed class DeepZoomView
     /// comfortably "deep zoom". Raise this (toward 1e-148) only if floatexp gains
     /// a scaled-double fast path. One-line knob.</summary>
     public const double MinRadius = 1e-147;
+
+    /// <summary>At or above this radius the pixel coordinate (center + offset)
+    /// is comfortably representable in fp64, so the pipeline iterates each pixel
+    /// DIRECTLY in double precision -- exact, and the only reliable path for the
+    /// Burning Ship, whose abs map makes perturbation unstable when the delta is
+    /// large (wide views). Below this, perturbation takes over (validated clean
+    /// at r &lt;= 1e-6). The two regimes overlap, so the exact handoff is not
+    /// delicate; this sits well inside both.</summary>
+    public const double DirectRadius = 1e-6;
+
+    /// <summary>True when the shallow direct-fp64 path should be used.</summary>
+    public bool UseDirectPath => Radius > DirectRadius;
 
     /// <summary>Multiply the zoom radius (factor &lt; 1 zooms in).</summary>
     public void ZoomBy(double factor)

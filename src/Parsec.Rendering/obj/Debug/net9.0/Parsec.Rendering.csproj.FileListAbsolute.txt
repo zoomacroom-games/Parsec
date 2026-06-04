@@ -13,3 +13,4 @@ C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.Rendering\obj\Debug\net
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.Rendering\obj\Debug\net9.0\refint\Parsec.Rendering.dll
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.Rendering\obj\Debug\net9.0\Parsec.Rendering.pdb
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.Rendering\obj\Debug\net9.0\ref\Parsec.Rendering.dll
+C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.Rendering\obj\Debug\net9.0\Parsec.Rendering.sourcelink.json

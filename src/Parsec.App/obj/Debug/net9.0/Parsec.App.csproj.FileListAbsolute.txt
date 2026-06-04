@@ -5,6 +5,7 @@ C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Pa
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.AssemblyInfoInputs.cache
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.AssemblyInfo.cs
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.csproj.CoreCompileInputs.cache
+C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.sourcelink.json
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\parsec-app.exe
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\parsec-app.deps.json
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\parsec-app.runtimeconfig.json
@@ -74,13 +75,12 @@ C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\ru
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Core.dll
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Rendering.dll
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Rendering.Gpu.dll
-C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Rendering.pdb
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Rendering.Gpu.pdb
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Core.pdb
+C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\bin\Debug\net9.0\Parsec.Rendering.pdb
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Avalonia\parsec-app.dll
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Avalonia\parsec-app.pdb
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\refint\Avalonia\parsec-app.dll
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.csproj.Up2Date
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.genruntimeconfig.cache
 C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\ref\parsec-app.dll
-C:\Users\yevoc\Documents\Github\Parsec\Parsec\src\Parsec.App\obj\Debug\net9.0\Parsec.App.sourcelink.json
