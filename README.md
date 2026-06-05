@@ -13,6 +13,8 @@ Parsec renders distance-estimated 3D fractals (Mandelbox, Mandelbulb, Kleinian g
 > [!IMPORTANT]
 > **Build and run `Parsec.App.csproj`.** The solution contains several projects, but `Parsec.App` is the only runnable application — the others are libraries it references. Building the solution or a library project on its own will not launch Parsec.
 
+You will probably need to make sure that Parsec.Rendering.csproj, Parsec.Rendering.Gpu.csproj, and Parsec.Core.csproj are included in your solution. (Right click solution -> Add -> Existing project and select each csproj file).
+
 ```bash
 git clone https://github.com/zoomacroom-games/Parsec
 cd parsec
