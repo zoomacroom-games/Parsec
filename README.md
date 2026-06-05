@@ -1,6 +1,6 @@
 # Parsec
 
-A GPU-accelerated explorer for 2D and 3D fractals — built in C# with [Avalonia](https://avaloniaui.net/) and OpenGL compute shaders.
+A GPU-accelerated explorer for 2D and 3D fractals - built in C# with [Avalonia](https://avaloniaui.net/) and OpenGL compute shaders.
 
 Parsec renders distance-estimated 3D fractals (Mandelbox, Mandelbulb, Kleinian groups, Menger sponges, and many more) in real time with a fly camera, and explores classic 2D escape-time sets (Mandelbrot, Julia, Burning Ship) with true perturbation-based deep zoom. It has a keyframe animation system, high-resolution "hero" stills, and video export (through FFMPEG).
 
