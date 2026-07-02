@@ -265,10 +265,13 @@ public partial class MainWindow : Window
         _bank.Refresh(_timeline);
     }
 
-    // Palette phase wraps at 2*pi; everything else is linear for the MVP.
+    // Palette phase is cyclic with period 1.0 (the cosine palette is periodic
+    // in phase with period 1, and the sliders run 0..1); everything else is
+    // linear for the MVP. AngularWrap (2*pi) is reserved for radian-valued
+    // params like camera orientation in phase 2.
     private static InterpKind KindFor(ParamDescriptor d) =>
         d.Label.Contains("phase", StringComparison.OrdinalIgnoreCase)
-            ? InterpKind.AngularWrap : InterpKind.Linear;
+            ? InterpKind.UnitWrap : InterpKind.Linear;
 
     private void OnCellSelected(int index)
     {

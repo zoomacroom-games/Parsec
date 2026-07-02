@@ -14,10 +14,17 @@ public enum InterpKind
     /// <summary>
     /// Angular value that wraps at 2*pi: interpolate the SHORTEST way around the
     /// circle, so e.g. 6.0 -> 0.2 sweeps forward across the wrap rather than
-    /// backward through the whole range. Used for the palette phase; camera
-    /// orientation will use this too in phase 2.
+    /// backward through the whole range. For radian-valued params (camera
+    /// orientation in phase 2).
     /// </summary>
     AngularWrap,
+    /// <summary>
+    /// Cyclic value with period 1.0 (the palette phases: the cosine palette is
+    /// periodic in phase with period 1). Same shortest-way rule as
+    /// <see cref="AngularWrap"/>, so 0.95 -> 0.05 sweeps forward across the
+    /// wrap instead of backward through the whole palette.
+    /// </summary>
+    UnitWrap,
 }
 
 /// <summary>
@@ -145,7 +152,7 @@ public sealed class Timeline
         int last = LastSetIndex();
         if (last <= fromIndex)
         {
-            ApplyValues(_slots[fromIndex].Values);
+            ApplyValues(_slots[NearestSetAtOrBefore(fromIndex)].Values);
             return false; // nothing after the start; immediately done
         }
 
@@ -158,10 +165,12 @@ public sealed class Timeline
         }
 
         // Find the set keyframes bracketing slotPos: the nearest set slot at or
-        // before it, and the nearest set slot after it.
-        int lo = fromIndex;
-        for (int i = (int)Math.Floor(slotPos); i >= fromIndex; i--)
-            if (_slots[i].IsSet) { lo = i; break; }
+        // before it, and the nearest set slot after it. The backward search runs
+        // past fromIndex all the way to slot 0 (always set) -- empty slots are
+        // just time, so starting playback from an unset slot mid-gap must
+        // interpolate the surrounding SET keyframes, never lerp from the unset
+        // slot's zero-filled snapshot.
+        int lo = NearestSetAtOrBefore((int)Math.Floor(slotPos));
         int hi = lo;
         for (int i = lo + 1; i <= last; i++)
             if (_slots[i].IsSet) { hi = i; break; }
@@ -182,6 +191,15 @@ public sealed class Timeline
         return true;
     }
 
+    /// <summary>The nearest set slot at or before <paramref name="index"/>.
+    /// Falls through to slot 0, which is always set.</summary>
+    private int NearestSetAtOrBefore(int index)
+    {
+        for (int i = Math.Min(index, SlotCount - 1); i > 0; i--)
+            if (_slots[i].IsSet) return i;
+        return 0;
+    }
+
     /// <summary>Apply a set of values back to the live state via the setters.</summary>
     public void ApplySlot(int index) => ApplyValues(_slots[index].Values);
 
@@ -193,18 +211,22 @@ public sealed class Timeline
 
     private static double Interp(double a, double b, double t, InterpKind kind)
     {
-        if (kind == InterpKind.AngularWrap)
-        {
-            const double tau = Math.PI * 2.0;
-            double d = (b - a) % tau;
-            if (d > Math.PI) d -= tau;
-            if (d < -Math.PI) d += tau;
-            double v = a + d * t;
-            v %= tau;
-            if (v < 0) v += tau;
-            return v;
-        }
+        if (kind == InterpKind.AngularWrap) return WrapLerp(a, b, t, Math.PI * 2.0);
+        if (kind == InterpKind.UnitWrap) return WrapLerp(a, b, t, 1.0);
         return a + (b - a) * t;
+    }
+
+    /// <summary>Lerp on a circle of circumference <paramref name="period"/>,
+    /// taking the shortest way around; result normalized to [0, period).</summary>
+    private static double WrapLerp(double a, double b, double t, double period)
+    {
+        double half = period * 0.5;
+        double d = (b - a) % period;
+        if (d > half) d -= period;
+        if (d < -half) d += period;
+        double v = (a + d * t) % period;
+        if (v < 0) v += period;
+        return v;
     }
 
     // ----------------------------------------------------------- persistence
