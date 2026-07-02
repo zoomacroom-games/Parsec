@@ -39,7 +39,8 @@ public static class SmokeTest
         int groups = (N + 63) / 64;
         shader.Use();
         shader.Dispatch(groups);
-        ctx.Gl.MemoryBarrier(GlConst.ShaderStorageBarrierBit);
+        // BufferUpdate covers the glGetBufferSubData readback below.
+        ctx.Gl.MemoryBarrier(GlConst.BufferUpdateBarrierBit);
         Console.WriteLine($"Dispatched {groups} workgroups");
 
         // Read back and verify.

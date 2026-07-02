@@ -481,7 +481,8 @@ public static class GpuRenders
     private static SKBitmap RenderTetrahedron(Gl gl, int width, int height, Action<int, int>? progress)
     {
         var ifs = CanonicalIFS3D.SierpinskiTetrahedron();
-        using var renderer = new GpuRaymarchingRenderer(gl, ifs, maxDepth: 10, detailEpsilon: 1e-2f);
+        using var pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuRaymarchingRenderer(gl, pipeline, ifs, maxDepth: 10, detailEpsilon: 1e-2f);
 
         var camera = new Camera3D(
             position: new Vector3(2.2f, 1.7f, 2.4f),
@@ -498,6 +499,7 @@ public static class GpuRenders
             background: new Color(0.97f, 0.965f, 0.94f),
             surface: Color.Rgb(80, 100, 130),
             lightDirection: new Vector3(0.5f, 0.9f, 0.3f),
+            palette: PaletteParams.Default,
             tileRows: 64,
             progress: progress);
     }
@@ -506,7 +508,8 @@ public static class GpuRenders
     {
         var ifs = TwistedIFS3D.SierpinskiTetrahedron(
             twistRadians: 0.5f, axisMode: TwistAxisMode.CentroidToVertex);
-        using var renderer = new GpuRaymarchingRenderer(gl, ifs, maxDepth: 10, detailEpsilon: 1e-2f);
+        using var pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuRaymarchingRenderer(gl, pipeline, ifs, maxDepth: 10, detailEpsilon: 1e-2f);
 
         var camera = new Camera3D(
             position: new Vector3(2.2f, 1.7f, 2.4f),
@@ -523,6 +526,7 @@ public static class GpuRenders
             background: new Color(0.97f, 0.965f, 0.94f),
             surface: Color.Rgb(95, 120, 95),
             lightDirection: new Vector3(0.5f, 0.9f, 0.3f),
+            palette: PaletteParams.Default,
             tileRows: 64,
             progress: progress);
     }
@@ -530,7 +534,8 @@ public static class GpuRenders
     private static SKBitmap RenderTrefoil(Gl gl, int width, int height, Action<int, int>? progress)
     {
         var ifs = KnotIFS.TrefoilKnot(sampleCount: 64, contraction: 0.12f);
-        using var renderer = new GpuRaymarchingRenderer(gl, ifs, maxDepth: 10, detailEpsilon: 1e-2f);
+        using var pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuRaymarchingRenderer(gl, pipeline, ifs, maxDepth: 10, detailEpsilon: 1e-2f);
 
         var camera = new Camera3D(
             position: new Vector3(3.0f, -5.5f, 6.5f),
@@ -547,6 +552,7 @@ public static class GpuRenders
             background: new Color(0.97f, 0.965f, 0.94f),
             surface: Color.Rgb(80, 100, 130),
             lightDirection: new Vector3(0.5f, -0.4f, 0.9f),
+            palette: PaletteParams.Default,
             tileRows: 48,
             progress: progress);
     }

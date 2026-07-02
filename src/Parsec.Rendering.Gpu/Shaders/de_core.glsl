@@ -5,9 +5,10 @@
 // This is an includable chunk (no #version, no main). Both the DE-validation
 // shader and the raymarching shader concatenate this after their own #version
 // line and before their own main(). It defines:
-//   - the IFS SSBO (binding 0) and Query SSBO (binding 1)
+//   - the IFS SSBO (binding 0) and Query SSBO (binding 9)
 //   - affine transform ops on packed 3x4 matrices
 //   - estimate(vec3): the Hart-style branch-and-bound distance estimator
+//   - gTrap: the orbit-trap analog raymarch_main's trapAlbedo() consumes
 //
 // Keeping this in one file means the DE has a single source of truth; the
 // validation harness and the renderer can never drift apart.
@@ -32,7 +33,11 @@ layout(std430, binding = 0) readonly buffer IFSData {
     IFSMap maps[];
 } ifs;
 
-layout(std430, binding = 1) readonly buffer Query {
+// Binding 9: the raymarch composite runs under RaymarchPipeline, which owns
+// binding 1 (FoldParams), 4/5 (render params / accumulator) and 2/3 (clear +
+// finalize); the attractor family owns 6/7/8. 9 is the first free slot that
+// both the raymarch and validation composites can share.
+layout(std430, binding = 9) readonly buffer Query {
     int   pointCount;     // used only by the validation shader
     int   numMaps;
     int   maxDepth;
@@ -40,6 +45,16 @@ layout(std430, binding = 1) readonly buffer Query {
     vec4  attractorSphere;   // (cx, cy, cz, r)
     vec4  detailEps;         // (eps, _, _, _) - only x is used
 } q;
+
+// Orbit-trap analog for the affine IFS DE, read by raymarch_main's
+// trapAlbedo(). There is no escape-time orbit here, so the fields derive from
+// the nearest LEAF sphere of the branch-and-bound descent (in attractor-sphere
+// units, center C, radius R):
+//   x = |leaf - C| / R    origin-trap analog (radial bands)
+//   y = |rel.y|           axis trap
+//   z = |rel.z|           plane trap
+//   w = depth / maxDepth  shell glaze weight (shallow leaves glaze)
+vec4 gTrap = vec4(0.0, 0.0, 0.0, 1.0);
 
 // -----------------------------------------------------------------------------
 // Affine ops on packed 3x4 transforms
@@ -137,6 +152,7 @@ float deFudge() {
 float estimate(vec3 p) {
     vec3 baseCenter = q.attractorSphere.xyz;
     float baseRadius = q.attractorSphere.w;
+    gTrap = vec4(0.0, 0.0, 0.0, 1.0);
     float startDist = length(p - baseCenter) - baseRadius;
     if (startDist > baseRadius * 2.0) return startDist;
 
@@ -167,7 +183,12 @@ float estimate(vec3 p) {
             if (f.depth >= maxDepth ||
                 f.radius < epsDetail * max(distToSphere, f.radius))
             {
-                if (distToSphere < best) best = distToSphere;
+                if (distToSphere < best) {
+                    best = distToSphere;
+                    vec3 rel = (f.center - baseCenter) / baseRadius;
+                    gTrap = vec4(length(rel), abs(rel.y), abs(rel.z),
+                                 float(f.depth) / float(max(maxDepth, 1)));
+                }
                 sp--;
                 continue;
             }

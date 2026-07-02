@@ -37,6 +37,7 @@ namespace Parsec.Rendering.Raymarching;
 ///   1 = FoldParams (per-fractal core)      4 = RenderParams (raymarch_main)
 ///   2 = packed RGBA8 output (finalize)     5 = vec4 accumulator (raymarch_main)
 ///   3 = AAParams (clear + finalize)        6/7/8 = attractor trajectory/hash/idx
+///   0/9 = affine-IFS maps + query (de_core, bound by GpuRaymarchingRenderer)
 /// </summary>
 public sealed class RaymarchPipeline : IDisposable
 {

@@ -32,6 +32,10 @@ public static class GlConst
 
     // Memory barrier bits
     public const uint ShaderStorageBarrierBit = 0x00002000;
+    // Required (GL 4.6 §7.13.2) for shader writes to be visible to
+    // glGetBufferSubData readback; ShaderStorageBarrierBit only orders
+    // shader-to-shader access.
+    public const uint BufferUpdateBarrierBit = 0x00000200;
     public const uint AllBarrierBits = 0xFFFFFFFF;
 
     // ---- additional constants for the on-screen blit path ----

@@ -115,9 +115,11 @@ public sealed class GpuIFS3DDistanceEstimator : IDisposable
         // Allocate output buffer.
         _resultBuffer.Allocate(n);
 
-        // Bind everything to the binding points the shader expects.
+        // Bind everything to the binding points the shader expects. Query lives
+        // at 9 (not 1) so the raymarch composite of de_core can coexist with
+        // RaymarchPipeline's FoldParams at binding 1.
         _ifsBuffer.BindBase(0);
-        _paramBuffer.BindBase(1);
+        _paramBuffer.BindBase(9);
         _pointsBuffer.BindBase(2);
         _resultBuffer.BindBase(3);
 
@@ -126,8 +128,10 @@ public sealed class GpuIFS3DDistanceEstimator : IDisposable
         int groups = (n + 63) / 64;
         _shader.Dispatch(groups);
 
-        // Fence before readback to ensure the writes are visible.
-        _gl.MemoryBarrier(GlConst.ShaderStorageBarrierBit);
+        // Fence before readback to ensure the writes are visible. BufferUpdate
+        // is the bit that covers glGetBufferSubData; ShaderStorage alone only
+        // orders shader-to-shader access.
+        _gl.MemoryBarrier(GlConst.BufferUpdateBarrierBit);
 
         return _resultBuffer.Download();
     }
