@@ -76,13 +76,18 @@ vec3 estimateNormal(vec3 p, float eps, vec3 viewDir, out bool degenerate) {
     return degenerate ? -viewDir : n / len;
 }
 
+// Shadow and AO rays apply the same deFudge() the primary march uses: cores
+// whose DE overestimates rely on fudge < 1 to not overstep, and an unfudged
+// shadow ray steps straight through the thin filigree that the primary ray
+// resolves -- light leaks and detached contact shadows.
 float softShadow(vec3 origin, vec3 dir, float hitEps, float maxDist,
                  int steps, float softness) {
     float result = 1.0;
+    float fudge = deFudge();
     float t = hitEps * 4.0;
     for (int i = 0; i < steps; i++) {
         vec3 p = origin + dir * t;
-        float d = estimate(p);
+        float d = estimate(p) * fudge;
         if (d < hitEps) return 0.0;
         result = min(result, softness * d / t);
         t += d;
@@ -94,10 +99,11 @@ float softShadow(vec3 origin, vec3 dir, float hitEps, float maxDist,
 float ambientOcclusion(vec3 p, vec3 normal, float stepDist, float intensity, int samples) {
     float occ = 0.0;
     float weight = 1.0;
+    float fudge = deFudge();
     for (int i = 1; i <= samples; i++) {
         float stepLen = float(i) * stepDist;
         vec3 samplePoint = p + normal * stepLen;
-        float d = estimate(samplePoint);
+        float d = estimate(samplePoint) * fudge;
         occ += (stepLen - d) * weight;
         weight *= 0.5;
     }
@@ -125,6 +131,9 @@ vec3 cosPalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
 }
 
 vec3 trapAlbedo(vec4 trap) {
+    // trapMix is (origin, axis, plane) but the core family packs gTrap as
+    // (origin, PLANE |z.x|, AXIS |z.xy|, shell) -- so axis weight rides trap.z
+    // and plane weight rides trap.y. Deliberate cross-mapping, not a bug.
     float tIn = rp.trapMix.x * trap.x
               + rp.trapMix.y * trap.z
               + rp.trapMix.z * trap.y;
@@ -204,7 +213,16 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
         t += d;
         if (t > maxDist) break;
     }
-    if (!hit && i >= maxSteps && t <= maxDist && lastD < hitEps * 4.0) hit = true;
+    // Step-exhaustion rescue: a ray that ran out of steps while already
+    // converged to within a few pixel-footprints counts as a hit. Uses the
+    // same cone-scaled epsilon as hit acceptance -- against the raw hitEps
+    // floor (1e-6 default), distant converged rays read as misses and speckle
+    // far detail with background pinholes.
+    if (!hit && i >= maxSteps && t <= maxDist) {
+        float pixelWorldEnd = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
+        float effEpsEnd = max(hitEps, 0.5 * pixelWorldEnd);
+        if (lastD < effEpsEnd * 4.0) hit = true;
+    }
     if (!hit) return h;
 
     vec3 hitPoint = ro + rd * t;

@@ -95,10 +95,11 @@ float estimate(vec3 p) {
     float logScale = 0.0;
     int   lastSph  = -1;
 
-    // Trap state (mins over the orbit, like the other cores).
+    // Trap state (mins over the orbit, same packing as the other cores:
+    // gTrap = (origin, plane |q.x|, axis |q.xy|, shell)).
     float trapOrigin = 1e20;     // gTrap.x -- min |q| during orbit
-    float trapAxis   = 1e20;     // gTrap.y -- min |q.x|
-    float trapPlane  = 1e20;     // gTrap.z -- min length(q.xy)
+    float trapPlaneX = 1e20;     // gTrap.y -- min |q.x| (x=0 plane trap)
+    float trapAxisZ  = 1e20;     // gTrap.z -- min length(q.xy) (z-axis trap)
     float trapShell  = 1e20;     // gTrap.w -- min distance to nearest sphere surface
 
     // Iterate inversions. Each step: if q is inside any inner sphere, invert
@@ -140,8 +141,8 @@ float estimate(vec3 p) {
         // Update orbit traps from the post-inversion position.
         float qlen = length(q);
         trapOrigin = min(trapOrigin, qlen);
-        trapAxis   = min(trapAxis,   abs(q.x));
-        trapPlane  = min(trapPlane,  length(q.xy));
+        trapPlaneX = min(trapPlaneX, abs(q.x));
+        trapAxisZ  = min(trapAxisZ,  length(q.xy));
         // Shell trap: distance to nearest sphere surface (any of the 5).
         float shell = abs(qlen - r_out);
         shell = min(shell, abs(length(q - innerCenter(0, tangency)) - R_INNER));
@@ -155,13 +156,15 @@ float estimate(vec3 p) {
     // limit set (logScale -> +inf) -> DE -> 0, ray hits.
     float de = deEnvelope * exp(-logScale);
 
-    // Pack traps. Categorical last-sphere mixed in lightly via trapAxis so the
-    // four lobes get distinguishable hue bands without breaking the smooth
-    // palette gradient.
-    gTrap = vec4(trapOrigin, trapAxis + 0.15 * float(lastSph), trapPlane, trapShell);
+    // Pack traps. Categorical last-sphere mixed in lightly via the plane trap
+    // so the four lobes get distinguishable hue bands without breaking the
+    // smooth palette gradient.
+    gTrap = vec4(trapOrigin, trapPlaneX + 0.15 * float(lastSph), trapAxisZ, trapShell);
 
     // Half-cut: CSG intersection with a half-space (max of signed distances).
-    if (cutEnabled) {
+    // Guard: normalize(0) is NaN and max(de, NaN) poisons the march, so an
+    // unset plane normal means "no cut" rather than garbage pixels.
+    if (cutEnabled && dot(fp.surfParams.xyz, fp.surfParams.xyz) > 1e-12) {
         vec3 n = normalize(fp.surfParams.xyz);
         float plane = dot(p, n) - planeOff;
         de = max(de, plane);

@@ -49,10 +49,11 @@ layout(std430, binding = 9) readonly buffer Query {
 // Orbit-trap analog for the affine IFS DE, read by raymarch_main's
 // trapAlbedo(). There is no escape-time orbit here, so the fields derive from
 // the nearest LEAF sphere of the branch-and-bound descent (in attractor-sphere
-// units, center C, radius R):
+// units, center C, radius R), packed with the family convention
+// gTrap = (origin, plane |x|, axis |xy|, shell):
 //   x = |leaf - C| / R    origin-trap analog (radial bands)
-//   y = |rel.y|           axis trap
-//   z = |rel.z|           plane trap
+//   y = |rel.x|           x=0 plane trap
+//   z = |rel.xy|          z-axis trap
 //   w = depth / maxDepth  shell glaze weight (shallow leaves glaze)
 vec4 gTrap = vec4(0.0, 0.0, 0.0, 1.0);
 
@@ -186,7 +187,7 @@ float estimate(vec3 p) {
                 if (distToSphere < best) {
                     best = distToSphere;
                     vec3 rel = (f.center - baseCenter) / baseRadius;
-                    gTrap = vec4(length(rel), abs(rel.y), abs(rel.z),
+                    gTrap = vec4(length(rel), abs(rel.x), length(rel.xy),
                                  float(f.depth) / float(max(maxDepth, 1)));
                 }
                 sp--;

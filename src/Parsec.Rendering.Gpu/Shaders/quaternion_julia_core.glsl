@@ -107,7 +107,9 @@ float estimate(vec3 p) {
     // Half-cut: intersect the solid with a half-space (CSG intersection = max of
     // signed distances). The plane is dot(p, n) = planeOff, in march space, so it
     // is already a true 3D distance and is NOT scaled by deScale.
-    if (cutEnabled) {
+    // Guard: normalize(0) is NaN and max(de, NaN) poisons the march, so an
+    // unset plane normal means "no cut" rather than garbage pixels.
+    if (cutEnabled && dot(fp.surfParams.xyz, fp.surfParams.xyz) > 1e-12) {
         vec3 n = normalize(fp.surfParams.xyz);
         float plane = dot(p, n) - planeOff;
         de = max(de, plane);

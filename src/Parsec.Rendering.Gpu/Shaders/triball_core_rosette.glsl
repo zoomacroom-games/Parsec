@@ -40,5 +40,7 @@ float estimate(vec3 p) {
     return length(z) / max(dr, 1e-9);             // linear Mandelbox/KIFS DE
 }
 
-vec4 attractorBoundingSphere() { return fp.boundSphere * 50; }
+// Radius-only inflation (see triball_core.glsl): scaling the whole vec4 would
+// also move the CENTER; scale just .w.
+vec4 attractorBoundingSphere() { return vec4(fp.boundSphere.xyz, fp.boundSphere.w * 50.0); }
 float deFudge()                { return fp.rot.w; }

@@ -109,8 +109,15 @@ float estimate(vec3 p) {
         }
     }
 
-    if (g < 1e-12) return 1e3;
-    return abs(v) / g;
+    // |V|/|grad V| is unbounded near SADDLES of V -- exactly the gaps between
+    // foam spheres, where g -> 0 with v finite. An uncapped ratio (or the old
+    // g~0 fallback of 1e3) takes one giant step that tunnels through geometry
+    // behind the gap, punching holes/sparkle into the foam. Cap the step at
+    // half a cell, the foam's natural feature scale: rays cross a gap in a few
+    // short steps instead of one unbounded one.
+    float stepCap = max(0.5 * fp.boxParams.y, 1e-3);
+    if (g < 1e-12) return stepCap;
+    return min(abs(v) / g, stepCap);
 }
 
 vec4 attractorBoundingSphere() {

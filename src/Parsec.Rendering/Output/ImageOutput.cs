@@ -16,7 +16,9 @@ public static class ImageOutput
 
         using var image = SKImage.FromBitmap(bitmap);
         using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-        using var stream = File.OpenWrite(path);
+        // File.Create truncates an existing file; OpenWrite does not, which
+        // left stale trailing bytes when re-rendering to a smaller PNG.
+        using var stream = File.Create(path);
         data.SaveTo(stream);
     }
 }

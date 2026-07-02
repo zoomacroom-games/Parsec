@@ -34,5 +34,8 @@ float estimate(vec3 p) {
     return length(z) / max(dr, 1e-9);             // linear Mandelbox/KIFS DE
 }
 
-vec4 attractorBoundingSphere() { return fp.boundSphere * 100; }
+// Radius-only inflation: the C#-side BoundRadius clips this mined variant, so
+// the shader widens the skip sphere. Scaling the whole vec4 would also move
+// the CENTER (fine only while it is the origin); scale just .w.
+vec4 attractorBoundingSphere() { return vec4(fp.boundSphere.xyz, fp.boundSphere.w * 100.0); }
 float deFudge()                { return fp.rot.w; }
