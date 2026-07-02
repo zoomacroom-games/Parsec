@@ -48,12 +48,32 @@ public sealed class Camera3D
         _forward = forwardRaw / forwardLen;
 
         // Right-handed frame: right = forward × up, then re-orthogonalize up.
-        _right = Vector3.Normalize(Vector3.Cross(_forward, up));
+        // Guard the degenerate case where up is (near-)parallel to the view
+        // direction -- e.g. a straight top-down shot with the default up=+Y.
+        // The cross product vanishes there and normalizing it would poison
+        // every ray with NaN (silent blank renders at full march cost), so
+        // substitute a reference axis that cannot be parallel to forward.
+        var rightRaw = Vector3.Cross(_forward, up);
+        if (rightRaw.LengthSquared() < 1e-8f)
+        {
+            var fallback = MathF.Abs(_forward.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitZ;
+            rightRaw = Vector3.Cross(_forward, fallback);
+        }
+        _right = Vector3.Normalize(rightRaw);
         _upPrime = Vector3.Cross(_right, _forward);
 
         _tanFovY = MathF.Tan(verticalFovRadians * 0.5f);
         _tanFovX = _tanFovY * aspectRatio;
     }
+
+    /// <summary>Unit view direction (position toward lookAt).</summary>
+    public Vector3 Forward => _forward;
+
+    /// <summary>Unit right vector of the view frame (degeneracy-guarded).</summary>
+    public Vector3 Right => _right;
+
+    /// <summary>Re-orthogonalized unit up vector of the view frame.</summary>
+    public Vector3 UpPrime => _upPrime;
 
     /// <summary>
     /// Generate a ray for normalized image coordinates <paramref name="u"/>, <paramref name="v"/>

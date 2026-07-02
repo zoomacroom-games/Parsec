@@ -82,11 +82,11 @@ internal readonly struct CameraFrame
 
     public static CameraFrame Build(Camera3D cam, int w, int h)
     {
-        var fwd = Vector3.Normalize(cam.LookAt - cam.Position);
-        var right = Vector3.Normalize(Vector3.Cross(fwd, cam.Up));
-        var up = Vector3.Cross(right, fwd);
+        // Use the camera's own basis (which guards the degenerate up-parallel-
+        // to-forward case) instead of re-deriving it here; only the horizontal
+        // tan is recomputed so it tracks the actual render dimensions.
         float tanY = MathF.Tan(cam.VerticalFovRadians * 0.5f);
         float tanX = tanY * ((float)w / h);
-        return new CameraFrame(fwd, right, up, tanX, tanY);
+        return new CameraFrame(cam.Forward, cam.Right, cam.UpPrime, tanX, tanY);
     }
 }
