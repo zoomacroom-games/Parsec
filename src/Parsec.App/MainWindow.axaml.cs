@@ -86,6 +86,14 @@ public partial class MainWindow : Window
         if (loadAnimButton != null)
             loadAnimButton.Click += OnLoadAnimClick;
 
+        var addOrbButton = this.FindControl<Button>("AddOrbButton");
+        if (addOrbButton != null)
+            addOrbButton.Click += OnAddOrbClick;
+
+        var removeOrbButton = this.FindControl<Button>("RemoveOrbButton");
+        if (removeOrbButton != null)
+            removeOrbButton.Click += OnRemoveOrbClick;
+
         if (_view != null && status != null)
         {
             _view.HeroRenderComplete += text => status.Text = text;
@@ -169,6 +177,36 @@ public partial class MainWindow : Window
         _view.RequestAttractorRegen();
     }
 
+    // ----------------------------------------------------------- orb lights
+    private void OnAddOrbClick(object? sender, RoutedEventArgs e)
+    {
+        if (_view == null) return;
+        StopPlayback();
+        if (!_view.AddOrbInView())
+        {
+            SetStatus($"Orb limit reached ({OrbState.MaxOrbs}).");
+            return;
+        }
+        // Orb sliders join the shared schema, so the panel and timeline must
+        // rebuild (the descriptor count changed -- keyframes reset, same as
+        // switching fractals).
+        RebuildForActiveFractal();
+        SetStatus($"Orb {_view.Orbs.Count} placed in view — tune it under \"Orb {_view.Orbs.Count}\" in the panel.");
+    }
+
+    private void OnRemoveOrbClick(object? sender, RoutedEventArgs e)
+    {
+        if (_view == null) return;
+        StopPlayback();
+        if (!_view.RemoveLastOrb())
+        {
+            SetStatus("No orbs to remove.");
+            return;
+        }
+        RebuildForActiveFractal();
+        SetStatus($"Orb removed — {_view.Orbs.Count} remaining.");
+    }
+
     // ----------------------------------------------------------- fractal switch
     private void OnFractalChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -214,6 +252,13 @@ public partial class MainWindow : Window
             if (deep) formulaSelector.SelectedIndex = _view.DeepFormula;   // index == formula
         }
         if (formulaLabel != null) formulaLabel.IsVisible = deep;
+
+        // Orbs are a 3D raymarch feature; the 2D deep-zoom mode has no scene
+        // to place them in.
+        var addOrbButton = this.FindControl<Button>("AddOrbButton");
+        var removeOrbButton = this.FindControl<Button>("RemoveOrbButton");
+        if (addOrbButton != null) addOrbButton.IsEnabled = !deep;
+        if (removeOrbButton != null) removeOrbButton.IsEnabled = !deep;
 
         RebuildForActiveFractal();   // keyframes are per-fractal; reset on switch
     }
@@ -261,7 +306,12 @@ public partial class MainWindow : Window
         // shared _activeSchema), so capture/apply read and write the live state
         // consistently and Values[] stays positionally aligned for its lifetime.
         _timeline = new Timeline(_activeSchema.Parameters, KindFor);
-        _timeline.SchemaTag = _view.ActiveType.ToString();
+        // Keyframe values align to descriptors by position, and orbs add
+        // descriptors -- so a saved animation only fits the same orb count.
+        // (Suffix only when orbs exist, so pre-orb saves keep loading.)
+        _timeline.SchemaTag = _view.Orbs.Count > 0
+            ? $"{_view.ActiveType}+orb{_view.Orbs.Count}"
+            : _view.ActiveType.ToString();
         _bank.Refresh(_timeline);
     }
 

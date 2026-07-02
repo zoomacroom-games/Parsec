@@ -53,6 +53,26 @@ internal struct RenderParamsGpu
 }
 
 /// <summary>
+/// A placeable emissive sphere light: rays that hit it show a luminous orb,
+/// and every fractal hit receives its diffuse contribution as a point light
+/// with inverse-square falloff. Public API type -- the App layer builds these;
+/// <see cref="RaymarchPipeline.SetOrbs"/> packs them into the GPU layout.
+/// </summary>
+public readonly record struct OrbLight(Vector3 Position, float Radius, float Luminosity);
+
+/// <summary>
+/// GPU layout for one orb (binding 10). Matches the OrbData SSBO in
+/// raymarch_main.glsl: PosRad = (center.xyz, radius), ColorLum = (rgb, luminosity).
+/// The active count rides RenderParams.MarchB.z (a previously unused slot).
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+internal struct OrbGpu
+{
+    public Vector4 PosRad;
+    public Vector4 ColorLum;
+}
+
+/// <summary>
 /// Parameters for the clear/finalize passes (binding 3). Tells the AA helper
 /// shaders how big the image is and how many samples to average. Bindings 2/3
 /// are used (not 6/7) to stay clear of the attractor core's trajectory/hash/

@@ -38,15 +38,27 @@ namespace Parsec.Rendering.Raymarching;
 ///   2 = packed RGBA8 output (finalize)     5 = vec4 accumulator (raymarch_main)
 ///   3 = AAParams (clear + finalize)        6/7/8 = attractor trajectory/hash/idx
 ///   0/9 = affine-IFS maps + query (de_core, bound by GpuRaymarchingRenderer)
+///   10 = orb lights (raymarch_main; count rides RenderParams.MarchB.z)
 /// </summary>
 public sealed class RaymarchPipeline : IDisposable
 {
+    /// <summary>Maximum placeable orb lights per scene (matches the fixed loop
+    /// bound the shader uses and the slot count uploaded every render).</summary>
+    public const int MaxOrbs = 8;
+
+    // Orbs are authored in sRGB-ish warm white; the shader decodes authored
+    // colors, so this is the displayed tint of a fully saturated orb face.
+    private static readonly Vector3 OrbColor = new(1.0f, 0.9f, 0.75f);
+
     private readonly Gl _gl;
     private readonly StorageBuffer<FoldParamsGpu> _foldBuffer;
     private readonly StorageBuffer<RenderParamsGpu> _renderBuffer;
     private readonly StorageBuffer<Vector4> _accumBuffer;
     private readonly StorageBuffer<uint> _imageBuffer;
     private readonly StorageBuffer<AAParamsGpu> _aaParamsBuffer;
+    private readonly StorageBuffer<OrbGpu> _orbBuffer;
+    private readonly OrbGpu[] _orbData = new OrbGpu[MaxOrbs];
+    private int _orbCount;
     private readonly ComputeShader _clearShader;
     private readonly ComputeShader _finalizeShader;
     private bool _disposed;
@@ -59,8 +71,37 @@ public sealed class RaymarchPipeline : IDisposable
         _accumBuffer = new StorageBuffer<Vector4>(gl);
         _imageBuffer = new StorageBuffer<uint>(gl);
         _aaParamsBuffer = new StorageBuffer<AAParamsGpu>(gl);
+        _orbBuffer = new StorageBuffer<OrbGpu>(gl);
         _clearShader = ComputeShader.FromSource(gl, ClearShaderSource, "aa_clear");
         _finalizeShader = ComputeShader.FromSource(gl, FinalizeShaderSource, "aa_finalize");
+    }
+
+    /// <summary>
+    /// Set the placeable orb lights for subsequent renders. Pass null or an
+    /// empty list to clear. Orbs beyond <see cref="MaxOrbs"/> are ignored.
+    /// State persists across Render calls until changed, so the host sets it
+    /// once per frame (or never, for orb-less callers like the CLI presets).
+    /// </summary>
+    public void SetOrbs(IReadOnlyList<OrbLight>? orbs)
+    {
+        ThrowIfDisposed();
+        _orbCount = Math.Min(orbs?.Count ?? 0, MaxOrbs);
+        for (int i = 0; i < MaxOrbs; i++)
+        {
+            if (orbs != null && i < _orbCount)
+            {
+                var o = orbs[i];
+                _orbData[i] = new OrbGpu
+                {
+                    PosRad = new Vector4(o.Position, MathF.Max(0f, o.Radius)),
+                    ColorLum = new Vector4(OrbColor, MathF.Max(0f, o.Luminosity)),
+                };
+            }
+            else
+            {
+                _orbData[i] = default;
+            }
+        }
     }
 
     /// <summary>
@@ -118,6 +159,10 @@ public sealed class RaymarchPipeline : IDisposable
         _foldBuffer.BindBase(1);
         _renderBuffer.BindBase(4);
         _accumBuffer.BindBase(5);
+        // Orb lights (binding 10): all MaxOrbs slots uploaded every render
+        // (tiny); the active count rides RenderParams.MarchB.z.
+        _orbBuffer.Upload(_orbData);
+        _orbBuffer.BindBase(10);
         fractalShader.Use();
 
         for (int sample = 0; sample < samples; sample++)
@@ -131,7 +176,8 @@ public sealed class RaymarchPipeline : IDisposable
 
                 _renderBuffer.Upload(new[] { BuildRenderParams(
                     width, height, rowOffset, rowCount, frame, camera,
-                    lightDir, background, surface, settings, palette, flags, jitter) });
+                    lightDir, background, surface, settings, palette, flags, jitter,
+                    _orbCount) });
                 _renderBuffer.BindBase(4);
 
                 int groupsX = (width + 7) / 8;
@@ -161,7 +207,7 @@ public sealed class RaymarchPipeline : IDisposable
         int width, int height, int rowOffset, int rowCount,
         CameraFrame frame, Camera3D camera, Vector3 lightDir,
         Color background, Color surface, RaymarchSettings s,
-        PaletteParams palette, int flags, Vector2 jitter)
+        PaletteParams palette, int flags, Vector2 jitter, int orbCount)
     {
         return new RenderParamsGpu
         {
@@ -181,7 +227,9 @@ public sealed class RaymarchPipeline : IDisposable
                 SrgbToLinear(background.B), 1),
             Surface = new Vector4(surface.R, surface.G, surface.B, 1),
             MarchA = new Vector4(s.HitEpsilon, s.MaxDistance, s.NormalEpsilon, s.ShadowSoftness),
-            MarchB = new Vector4(s.AOStepDistance, s.AOIntensity, 0, 0),
+            // MarchB.z carries the active orb-light count (spare slot; the orb
+            // data itself lives in the binding-10 SSBO).
+            MarchB = new Vector4(s.AOStepDistance, s.AOIntensity, orbCount, 0),
             MarchI0 = s.MaxSteps, MarchI1 = s.ShadowSteps,
             MarchI2 = s.AOSamples, MarchI3 = flags,
             PalBase = new Vector4(palette.Base, palette.Frequency),
@@ -240,6 +288,7 @@ public sealed class RaymarchPipeline : IDisposable
         _accumBuffer.Dispose();
         _imageBuffer.Dispose();
         _aaParamsBuffer.Dispose();
+        _orbBuffer.Dispose();
     }
 
     // ------------------------------------------------------------------------

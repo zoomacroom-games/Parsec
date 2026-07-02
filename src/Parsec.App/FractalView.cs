@@ -85,6 +85,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// <summary>Key-light direction + intensity, shared across all fractals.</summary>
     public LightState Light { get; } = new();
 
+    /// <summary>Placeable luminous orbs, shared across all 3D fractals.</summary>
+    public OrbState Orbs { get; } = new();
+
     /// <summary>Which fractal is currently displayed.</summary>
     public FractalType ActiveType { get; private set; } = FractalType.Kifs;
 
@@ -159,6 +162,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         combined.AddRange(Palette.BuildSchema().Parameters);
         combined.AddRange(Reflection.BuildSchema().Parameters);
         combined.AddRange(Light.BuildSchema().Parameters);
+        combined.AddRange(Orbs.BuildSchema().Parameters);
         return new ParamSchema { Parameters = combined };
     }
 
@@ -460,44 +464,77 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
             // Speed scales with distance to the surface: glide slowly near detail,
             // travel fast in open space. Clamp so we never freeze or rocket.
-            float de = ActiveType switch
-            {
-                FractalType.Kleinian => KleinianDE.Estimate(_cam.Position, Kleinian.ToParams()),
-                FractalType.Kifs => KifsDE.Estimate(_cam.Position, Kifs.ToParams()),
-                // The attractor has no cheap closed-form DE (it lives in the hash),
-                // and is viewed from outside, so a steady mid-speed glide is fine.
-                FractalType.Attractor => 1.0f,
-                FractalType.Mandelbulb => MandelbulbDE.Estimate(_cam.Position, Mandelbulb.ToParams()),
-                FractalType.QuaternionJulia => QuaternionJuliaDE.Estimate(_cam.Position, QuaternionJulia.ToParams()),
-                FractalType.RotBox => RotBoxDE.Estimate(_cam.Position, RotBox.ToParams()),
-                FractalType.Hybrid => HybridDE.Estimate(_cam.Position, Hybrid.ToParams()),
-                FractalType.QJBox => QJBoxDE.Estimate(_cam.Position, QJBox.ToParams()),
-                FractalType.Menger => MengerDE.Estimate(_cam.Position, Menger.ToParams()),
-                FractalType.Bicomplex => BicomplexDE.Estimate(_cam.Position, Bicomplex.ToParams()),
-                FractalType.Apollonian => 1.0f,
-                // Phoenix: same situation as Apollonian -- numerical-gradient DE only,
-                // no cheap closed-form CPU DE. Could port one later if needed.
-                FractalType.Phoenix => 1.0f,
-                // Biomorph: same Mandelbulb-style scalar-derivative DE as Phoenix,
-                // no closed-form CPU DE port done.
-                FractalType.Biomorph => 1.0f,
-                // Mosely: exact GPU DE, but no CPU port yet -> steady glide.
-                FractalType.Mosely => 1.0f,
-                FractalType.PseudoKleinian4D => 1.0f,
-            FractalType.RiemannSphere => 1.0f,
-            FractalType.Mandalay => 1.0f,
-            FractalType.Anisotropic => 1.0f,
-            FractalType.OrbitHybrid => 1.0f,
-            FractalType.BurningShip => 1.0f,
-                FractalType.Mandelbox => MandelboxDE.Estimate(_cam.Position, Mandelbox.ToParams()),
-                _ => MandelboxDE.Estimate(_cam.Position, Fractal.ToParams()),
-            };
+            float de = EstimateCameraDE();
             float speed = BaseMoveSpeed * Math.Clamp(de, 0.02f, 4.0f);
             _cam.Move(local, speed * dt);
         }
 
         _dirty = true;
         RequestNextFrameRendering();
+    }
+
+    /// <summary>
+    /// Distance estimate at the camera for the active fractal, used to scale
+    /// fly speed and to place new orbs. Falls back to 1.0 for chapters with no
+    /// cheap closed-form CPU DE (attractor, apollonian, phoenix, ...).
+    /// </summary>
+    private float EstimateCameraDE() => ActiveType switch
+    {
+        FractalType.Kleinian => KleinianDE.Estimate(_cam.Position, Kleinian.ToParams()),
+        FractalType.Kifs => KifsDE.Estimate(_cam.Position, Kifs.ToParams()),
+        // The attractor has no cheap closed-form DE (it lives in the hash),
+        // and is viewed from outside, so a steady mid-speed glide is fine.
+        FractalType.Attractor => 1.0f,
+        FractalType.Mandelbulb => MandelbulbDE.Estimate(_cam.Position, Mandelbulb.ToParams()),
+        FractalType.QuaternionJulia => QuaternionJuliaDE.Estimate(_cam.Position, QuaternionJulia.ToParams()),
+        FractalType.RotBox => RotBoxDE.Estimate(_cam.Position, RotBox.ToParams()),
+        FractalType.Hybrid => HybridDE.Estimate(_cam.Position, Hybrid.ToParams()),
+        FractalType.QJBox => QJBoxDE.Estimate(_cam.Position, QJBox.ToParams()),
+        FractalType.Menger => MengerDE.Estimate(_cam.Position, Menger.ToParams()),
+        FractalType.Bicomplex => BicomplexDE.Estimate(_cam.Position, Bicomplex.ToParams()),
+        FractalType.Apollonian => 1.0f,
+        // Phoenix: same situation as Apollonian -- numerical-gradient DE only,
+        // no cheap closed-form CPU DE. Could port one later if needed.
+        FractalType.Phoenix => 1.0f,
+        // Biomorph: same Mandelbulb-style scalar-derivative DE as Phoenix,
+        // no closed-form CPU DE port done.
+        FractalType.Biomorph => 1.0f,
+        // Mosely: exact GPU DE, but no CPU port yet -> steady glide.
+        FractalType.Mosely => 1.0f,
+        FractalType.PseudoKleinian4D => 1.0f,
+        FractalType.RiemannSphere => 1.0f,
+        FractalType.Mandalay => 1.0f,
+        FractalType.Anisotropic => 1.0f,
+        FractalType.OrbitHybrid => 1.0f,
+        FractalType.BurningShip => 1.0f,
+        FractalType.Mandelbox => MandelboxDE.Estimate(_cam.Position, Mandelbox.ToParams()),
+        _ => MandelboxDE.Estimate(_cam.Position, Fractal.ToParams()),
+    };
+
+    /// <summary>
+    /// Place a new luminous orb somewhere visible: along the camera's view
+    /// direction, most of the way toward the fractal surface (via the DE at
+    /// the camera), with a small per-index lateral offset so consecutive orbs
+    /// don't stack on one spot. Returns false at the orb limit.
+    /// </summary>
+    public bool AddOrbInView()
+    {
+        float de = EstimateCameraDE();
+        float d = Math.Clamp(de * 0.8f, 0.4f, 4.0f);
+        int i = Orbs.Count;
+        var lateral = _cam.Right * (0.35f * ((i % 3) - 1))
+                    + _cam.UpLocal * (0.35f * ((i / 3) % 3 - 1));
+        bool ok = Orbs.Add(_cam.Position + _cam.Forward * d + lateral);
+        if (ok) MarkDirty();
+        return ok;
+    }
+
+    /// <summary>Remove the most recently placed orb. Returns false when none.</summary>
+    public bool RemoveLastOrb()
+    {
+        bool ok = Orbs.RemoveLast();
+        if (ok) MarkDirty();
+        return ok;
     }
 
     // ------------------------------------------------------------------- GL
@@ -664,6 +701,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         if (_dirty && !(ActiveType == FractalType.Attractor && _attractorHash == null))
         {
             var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
+            // Orb lights ride shared pipeline state (binding 10), so one call
+            // covers every renderer in the switch below. DeepZoom ignores it.
+            _pipeline.SetOrbs(Orbs.ToLights());
             // 3D raymarch previews use the fixed preview buffer; deep-zoom renders
             // at native resolution so the 2D filigree stays crisp at 1:1 -- but
             // while interacting it renders at a reduced scale for responsiveness
@@ -1013,6 +1053,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         var bg = new Color(0.02f, 0.03f, 0.07f);
         var light = Light.ToDirection();
         var pal = Palette.ToParams();
+        _pipeline!.SetOrbs(Orbs.ToLights());
         return ActiveType switch
         {
             FractalType.DeepZoom => DeepZoomBitmap(width, height),

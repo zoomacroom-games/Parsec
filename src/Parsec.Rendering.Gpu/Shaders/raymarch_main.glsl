@@ -53,6 +53,27 @@ layout(std430, binding = 5) buffer Accum {
 } accum;
 
 // -----------------------------------------------------------------------------
+// Placeable orb lights (binding 10). Each orb is BOTH an emissive sphere the
+// ray can hit directly (a visible luminous ball) and a point light that adds
+// diffuse illumination to every fractal hit. The active count rides
+// rp.marchB.z (a previously spare slot); RaymarchPipeline uploads all slots
+// every render, zeroed past the count.
+// -----------------------------------------------------------------------------
+
+struct OrbLight {
+    vec4 posRad;    // (center.xyz, radius)
+    vec4 colorLum;  // (rgb authored-sRGB tint, luminosity)
+};
+
+layout(std430, binding = 10) readonly buffer OrbData {
+    OrbLight orbs[];
+} ob;
+
+int orbCount() {
+    return int(rp.marchB.z + 0.5);
+}
+
+// -----------------------------------------------------------------------------
 // Shading helpers
 // -----------------------------------------------------------------------------
 
@@ -178,67 +199,104 @@ vec3 environment(vec3 rd) {
 // -----------------------------------------------------------------------------
 struct Hit {
     bool  hit;
+    bool  emissive;   // hit an orb light: shade as emission, terminate path
     vec3  pos;
     vec3  normal;
     vec3  albedo;
+    vec3  emission;   // linear-light radiance when emissive
     float t;
 };
 
+// Nearest forward orb intersection in (0, tLimit). Skips orbs the origin is
+// inside, so the camera (or a reflection origin) can see out of an orb it
+// happens to sit in. Returns updated tLimit and writes the emissive fields.
+void intersectOrbs(vec3 ro, vec3 rd, inout Hit h, float tLimit) {
+    int n = orbCount();
+    for (int i = 0; i < n; i++) {
+        vec3  oc   = ob.orbs[i].posRad.xyz;
+        float orad = ob.orbs[i].posRad.w;
+        if (orad <= 0.0) continue;
+        if (length(ro - oc) <= orad) continue;   // inside: see through it
+        float tOrb;
+        if (!intersectSphereForward(ro, rd, oc, orad, tOrb)) continue;
+        if (tOrb <= 0.0 || tOrb >= tLimit) continue;
+        tLimit = tOrb;
+        vec3 pos = ro + rd * tOrb;
+        vec3 nrm = normalize(pos - oc);
+        // Limb falloff: full luminosity face-on, dimmer toward the edge, so
+        // the disc reads as a glowing sphere rather than a flat cutout.
+        float ndv = clamp(dot(nrm, -rd), 0.0, 1.0);
+        float lum = ob.orbs[i].colorLum.a;
+        h.hit = true; h.emissive = true;
+        h.t = tOrb; h.pos = pos; h.normal = nrm;
+        h.emission = srgbToLinear(ob.orbs[i].colorLum.rgb) * lum * (0.35 + 0.65 * ndv);
+    }
+}
+
 Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int maxSteps) {
     Hit h;
-    h.hit = false; h.pos = vec3(0.0); h.normal = vec3(0.0);
-    h.albedo = vec3(0.0); h.t = maxDist;
+    h.hit = false; h.emissive = false; h.pos = vec3(0.0); h.normal = vec3(0.0);
+    h.albedo = vec3(0.0); h.emission = vec3(0.0); h.t = maxDist;
 
     vec4 bsphere = attractorBoundingSphere();
     float tEnter;
-    if (!intersectSphereForward(ro, rd, bsphere.xyz, bsphere.w, tEnter)) return h;
+    if (intersectSphereForward(ro, rd, bsphere.xyz, bsphere.w, tEnter)) {
+        float t = max(0.0, tEnter);
+        bool hit = false;
+        float fudge = deFudge();
+        int i;
+        float lastD = 1e9;
+        for (i = 0; i < maxSteps; i++) {
+            vec3 p = ro + rd * t;
+            float d = estimate(p) * fudge;
+            // Cone-scaled hit epsilon: stop when the surface is within ~half a
+            // pixel's world-size at this distance, so detail resolves with
+            // resolution/zoom instead of a fixed world threshold. hitEps acts as
+            // a floor (finest allowed / float-noise guard). Low-res preview
+            // yields a naturally coarse eps (stays cheap); high-res hero
+            // sharpens itself.
+            float pixelWorld = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
+            float effectiveEps = max(hitEps, 0.5 * pixelWorld);
+            if (d < effectiveEps) { hit = true; break; }
+            lastD = d;
+            t += d;
+            if (t > maxDist) break;
+        }
+        // Step-exhaustion rescue: a ray that ran out of steps while already
+        // converged to within a few pixel-footprints counts as a hit. Uses the
+        // same cone-scaled epsilon as hit acceptance -- against the raw hitEps
+        // floor (1e-6 default), distant converged rays read as misses and
+        // speckle far detail with background pinholes.
+        if (!hit && i >= maxSteps && t <= maxDist) {
+            float pixelWorldEnd = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
+            float effEpsEnd = max(hitEps, 0.5 * pixelWorldEnd);
+            if (lastD < effEpsEnd * 4.0) hit = true;
+        }
 
-    float t = max(0.0, tEnter);
-    bool hit = false;
-    float fudge = deFudge();
-    int i;
-    float lastD = 1e9;
-    for (i = 0; i < maxSteps; i++) {
-        vec3 p = ro + rd * t;
-        float d = estimate(p) * fudge;
-        // Cone-scaled hit epsilon: stop when the surface is within ~half a
-        // pixel's world-size at this distance, so detail resolves with
-        // resolution/zoom instead of a fixed world threshold. hitEps acts as a
-        // floor (finest allowed / float-noise guard). Low-res preview yields a
-        // naturally coarse eps (stays cheap); high-res hero sharpens itself.
-        float pixelWorld = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
-        float effectiveEps = max(hitEps, 0.5 * pixelWorld);
-        if (d < effectiveEps) { hit = true; break; }
-        lastD = d;
-        t += d;
-        if (t > maxDist) break;
+        if (hit) {
+            vec3 hitPoint = ro + rd * t;
+            // Capture the orbit trap at the hit BEFORE normal estimation (which
+            // calls estimate() four times and clobbers gTrap).
+            estimate(hitPoint);
+            vec3 albedo = trapAlbedo(gTrap);
+            bool degenerate;
+            // Match the normal sampling radius to the pixel footprint at the
+            // hit, so relief finer than a fixed normalEps isn't averaged away at
+            // deep zoom. normalEps is the floor (float-noise guard; normals
+            // sparkle below it).
+            float pixelWorldHit = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
+            float nEps = max(normalEps, 0.5 * pixelWorldHit);
+            vec3 normal = estimateNormal(hitPoint, nEps, rd, degenerate);
+
+            h.hit = true; h.pos = hitPoint; h.normal = normal;
+            h.albedo = albedo; h.t = t;
+        }
     }
-    // Step-exhaustion rescue: a ray that ran out of steps while already
-    // converged to within a few pixel-footprints counts as a hit. Uses the
-    // same cone-scaled epsilon as hit acceptance -- against the raw hitEps
-    // floor (1e-6 default), distant converged rays read as misses and speckle
-    // far detail with background pinholes.
-    if (!hit && i >= maxSteps && t <= maxDist) {
-        float pixelWorldEnd = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
-        float effEpsEnd = max(hitEps, 0.5 * pixelWorldEnd);
-        if (lastD < effEpsEnd * 4.0) hit = true;
-    }
-    if (!hit) return h;
 
-    vec3 hitPoint = ro + rd * t;
-    // Capture the orbit trap at the hit BEFORE normal estimation (which calls
-    // estimate() four times and clobbers gTrap).
-    estimate(hitPoint);
-    vec3 albedo = trapAlbedo(gTrap);
-    bool degenerate;
-    // Match the normal sampling radius to the pixel footprint at the hit, so
-    // relief finer than a fixed normalEps isn't averaged away at deep zoom.
-    // normalEps is the floor (float-noise guard; normals sparkle below it).
-    float pixelWorldHit = (2.0 * rp.tanFov.y / float(rp.imageHeight)) * t;
-    float nEps = max(normalEps, 0.5 * pixelWorldHit);
-    vec3 normal = estimateNormal(hitPoint, nEps, rd, degenerate);
-
-    h.hit = true; h.pos = hitPoint; h.normal = normal; h.albedo = albedo; h.t = t;
+    // Orb lights: analytic spheres, tested independently of the DE march so
+    // they are visible outside the attractor's bounding sphere and where the
+    // fractal was missed. A nearer orb overrides the fractal hit.
+    intersectOrbs(ro, rd, h, h.hit ? h.t : maxDist);
     return h;
 }
 
@@ -277,7 +335,33 @@ vec3 shadeDirect(Hit h, float hitEps, float maxDist) {
     // has real headroom; the finalize pass clamps and sRGB-encodes.
     const float ambient = 0.25;
     float lighting = ambient * ao + (1.0 - ambient) * lambert * shadow * intensity;
-    return h.albedo * lighting;
+
+    // Placeable orb lights: diffuse point lights with inverse-square falloff,
+    // shadowed by the same soft-shadow march as the key light (and skipped in
+    // preview along with it). The shadow march is capped at the orb's surface
+    // so a light never occludes itself.
+    vec3 orbLight = vec3(0.0);
+    int n = orbCount();
+    for (int i = 0; i < n; i++) {
+        float orad = ob.orbs[i].posRad.w;
+        float lum  = ob.orbs[i].colorLum.a;
+        if (orad <= 0.0 || lum <= 0.0) continue;
+        vec3 toL = ob.orbs[i].posRad.xyz - h.pos;
+        float dist = length(toL);
+        if (dist < 1e-5) continue;
+        vec3 L = toL / dist;
+        float lam = clamp(dot(h.normal, L), 0.0, 1.0);
+        if (lam <= 0.0) continue;
+        float atten = lum / (1.0 + dist * dist);
+        float sh = 1.0;
+        if (softShadowsOn) {
+            float reach = max(dist - orad - hitEps * 8.0, 0.0);
+            sh = softShadow(offsetPoint, L, hitEps, reach, shadowSteps, shadowSoft);
+        }
+        orbLight += srgbToLinear(ob.orbs[i].colorLum.rgb) * (lam * sh * atten);
+    }
+
+    return h.albedo * (vec3(lighting) + orbLight);
 }
 
 void main() {
@@ -319,6 +403,13 @@ void main() {
             // Primary miss -> flat background (keeps the composition). Reflection
             // miss -> environment gradient (so glossy edges reflect a "world").
             color += throughput * (bounce == 0 ? rp.background.rgb : environment(rd));
+            break;
+        }
+
+        // Orb lights are pure emitters: deposit their radiance and terminate
+        // the path (visible directly and in reflections; nothing bounces off).
+        if (h.emissive) {
+            color += throughput * h.emission;
             break;
         }
 

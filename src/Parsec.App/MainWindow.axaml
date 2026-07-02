@@ -87,6 +87,14 @@
           <Button Name="LoadAnimButton" Grid.Column="1" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Center" Margin="2,0,0,0" Content="Load Anim" />
         </Grid>
+        <TextBlock Name="OrbLabel" Text="ORB LIGHTS" Foreground="#9a9ab0" FontSize="11"
+                   FontWeight="SemiBold" Margin="0,8,0,0" />
+        <Grid Name="OrbButtons" ColumnDefinitions="*,*">
+          <Button Name="AddOrbButton" Grid.Column="0" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="0,0,2,0" Content="+ Orb" />
+          <Button Name="RemoveOrbButton" Grid.Column="1" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Center" Margin="2,0,0,0" Content="− Orb" />
+        </Grid>
       </StackPanel>
       <Border Name="PanelHost" Grid.Row="1" />
     </Grid>
