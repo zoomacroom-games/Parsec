@@ -1,7 +1,10 @@
 // Raymarching entry point. Concatenated after de_core.glsl by the loader.
 // Renders one pixel per thread by sphere-tracing the distance estimator and
-// shading hits with Lambert + soft shadows + AO. Accumulates into a vec4
-// buffer for SSAA; the finalize pass (RaymarchPipeline) divides + packs.
+// shading hits with Lambert + soft shadows + AO. Accumulates LINEAR-LIGHT
+// color into a vec4 buffer for SSAA; the finalize pass (RaymarchPipeline)
+// divides, clamps, and sRGB-encodes. Authored colors (palette, environment,
+// background) are sRGB, so they are decoded to linear before shading -- a
+// fully lit surface reproduces its authored color exactly.
 //
 // Now also supports optional glossy self-reflection via a fixed-depth bounce
 // loop (hero-only, per-fractal opt-in through reflectParams). When reflections
@@ -52,6 +55,14 @@ layout(std430, binding = 5) buffer Accum {
 // -----------------------------------------------------------------------------
 // Shading helpers
 // -----------------------------------------------------------------------------
+
+// Decode an authored (sRGB) color to linear light. Lighting math happens in
+// linear space; the finalize pass re-encodes with the inverse transfer.
+vec3 srgbToLinear(vec3 c) {
+    vec3 lo = c / 12.92;
+    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+    return mix(lo, hi, step(vec3(0.04045), c));
+}
 
 vec3 estimateNormal(vec3 p, float eps, vec3 viewDir, out bool degenerate) {
     vec2 k = vec2(1.0, -1.0);
@@ -128,7 +139,9 @@ vec3 trapAlbedo(vec4 trap) {
 
     float shell = 1.0 - clamp(trap.w * 2.0, 0.0, 1.0);
     col = mix(col, vec3(0.95, 0.93, 0.88), shell * rp.palPhase.a);
-    return col;
+    // Palette colors are authored in sRGB; decode so the lighting multiply
+    // happens in linear space.
+    return srgbToLinear(clamp(col, 0.0, 1.0));
 }
 
 // -----------------------------------------------------------------------------
@@ -140,12 +153,12 @@ vec3 trapAlbedo(vec4 trap) {
 // -----------------------------------------------------------------------------
 vec3 environment(vec3 rd) {
     float h = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 low  = vec3(0.30, 0.22, 0.16);   // warm horizon
-    vec3 high = vec3(0.12, 0.16, 0.24);   // cool zenith
-    vec3 env = mix(low, high, h);
+    vec3 low  = vec3(0.30, 0.22, 0.16);   // warm horizon (authored sRGB)
+    vec3 high = vec3(0.12, 0.16, 0.24);   // cool zenith (authored sRGB)
+    vec3 env = srgbToLinear(mix(low, high, h));
     float sun = max(0.0, dot(rd, rp.lightDir.xyz));
-    float intensity = rp.lightDir.w <= 0.0 ? 1.0 : rp.lightDir.w;
-    env += vec3(0.60, 0.50, 0.40) * pow(sun, 48.0) * intensity;
+    float intensity = max(rp.lightDir.w, 0.0);
+    env += srgbToLinear(vec3(0.60, 0.50, 0.40)) * pow(sun, 48.0) * intensity;
     return env;
 }
 
@@ -237,11 +250,15 @@ vec3 shadeDirect(Hit h, float hitEps, float maxDist) {
         ao = ambientOcclusion(offsetPoint, h.normal, aoStep, aoIntensity, aoSamples);
 
     // Key-light intensity rides in lightDir.w (unused .w slot, no struct change).
-    // Guarded: <=0 (old/unset pipeline) -> 1.0 so existing renders are unchanged.
-    float intensity = rp.lightDir.w <= 0.0 ? 1.0 : rp.lightDir.w;
+    // Used directly: 0 really means "key light off, ambient fill only" (the UI
+    // slider goes to 0), negatives clamp to 0.
+    float intensity = max(rp.lightDir.w, 0.0);
+    // AO attenuates only the ambient (indirect) term -- the key light is already
+    // gated by its own shadow ray, and multiplying it by AO too double-darkens
+    // every lit pixel. No clamp here: the accumulator is HDR, so intensity > 1
+    // has real headroom; the finalize pass clamps and sRGB-encodes.
     const float ambient = 0.25;
-    float lighting = ambient * ao + (1.0 - ambient) * lambert * shadow * ao * intensity;
-    lighting = clamp(lighting, 0.0, 1.0);
+    float lighting = ambient * ao + (1.0 - ambient) * lambert * shadow * intensity;
     return h.albedo * lighting;
 }
 

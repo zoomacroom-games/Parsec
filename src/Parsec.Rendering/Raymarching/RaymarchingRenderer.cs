@@ -133,14 +133,31 @@ public sealed class RaymarchingRenderer
             ao = AmbientOcclusion(offsetPoint, normal, settings);
 
         // Composite. Ambient term keeps shadowed regions from going pitch black.
+        // AO attenuates only the ambient (indirect) term; the key light is
+        // already gated by its own shadow ray. Matches the GPU shadeDirect().
         const float ambient = 0.25f;
-        float lighting = ambient * ao + (1f - ambient) * lambert * shadow * ao;
+        float intensity = MathF.Max(0f, settings.LightIntensity);
+        float lighting = ambient * ao + (1f - ambient) * lambert * shadow * intensity;
 
+        // Shade in linear light, then re-encode for the 8-bit output: the
+        // authored surface color is sRGB, so decode -> multiply -> encode. A
+        // fully lit surface reproduces its authored color exactly.
         return new Color(
-            surfaceColor.R * lighting,
-            surfaceColor.G * lighting,
-            surfaceColor.B * lighting,
+            LinearToSrgb(SrgbToLinear(surfaceColor.R) * lighting),
+            LinearToSrgb(SrgbToLinear(surfaceColor.G) * lighting),
+            LinearToSrgb(SrgbToLinear(surfaceColor.B) * lighting),
             1f);
+    }
+
+    /// <summary>sRGB decode: display value -> linear light.</summary>
+    private static float SrgbToLinear(float c) =>
+        c <= 0.04045f ? c / 12.92f : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+
+    /// <summary>sRGB encode: linear light -> display value, clamped at white.</summary>
+    private static float LinearToSrgb(float c)
+    {
+        c = Math.Clamp(c, 0f, 1f);
+        return c <= 0.0031308f ? c * 12.92f : 1.055f * MathF.Pow(c, 1f / 2.4f) - 0.055f;
     }
 
     private Vector3 EstimateNormal(Vector3 p, float eps)

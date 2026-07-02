@@ -27,8 +27,9 @@ public sealed class LightState
     /// overhead, 0 = on the horizon, -90 = straight below.</summary>
     public float Elevation = 48f;
 
-    /// <summary>Diffuse light intensity. 1.0 = original look; 0 = flat ambient
-    /// fill; &gt;1 brightens with highlight rolloff (the shader clamps lit areas).</summary>
+    /// <summary>Diffuse light intensity. 1.0 = the default look; 0 = key light
+    /// off (flat ambient fill only); &gt;1 brightens into the HDR headroom
+    /// (clamped at white by the finalize pass's sRGB encode).</summary>
     public float Intensity = 1.0f;
 
     /// <summary>Unit direction TOWARD the light (what the shader's Lambert term

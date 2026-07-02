@@ -23,7 +23,9 @@ namespace Parsec.Rendering.Raymarching;
 ///          Upload RenderParams (with jitter), dispatch fractalShader.
 ///          fractalShader reads RenderParams + FoldParams, writes accumulated
 ///          vec4 colors into the accumulator buffer.
-///   4. Finalize: divide accumulator by sampleCount, pack to RGBA8 (one dispatch).
+///   4. Finalize: divide accumulator by sampleCount, clamp, sRGB-encode, pack
+///      to RGBA8 (one dispatch). The accumulator holds linear light; encoding
+///      here (once, after averaging) keeps SSAA averaging linear-correct.
 ///   5. Download and return the uint[] image.
 ///
 /// SSAA = "supersampling antialiasing." sampleCount=1 reproduces the old single-
@@ -170,7 +172,12 @@ public sealed class RaymarchPipeline : IDisposable
             CamUp = new Vector4(frame.Up, 0),
             TanFov = new Vector4(frame.TanFovX, frame.TanFovY, 0, 0),
             LightDir = new Vector4(lightDir, s.LightIntensity),
-            Background = new Vector4(background.R, background.G, background.B, 1),
+            // The shader shades in linear light and the finalize pass sRGB-encodes,
+            // so the authored background must be decoded here to survive the
+            // round-trip unchanged on miss pixels.
+            Background = new Vector4(
+                SrgbToLinear(background.R), SrgbToLinear(background.G),
+                SrgbToLinear(background.B), 1),
             Surface = new Vector4(surface.R, surface.G, surface.B, 1),
             MarchA = new Vector4(s.HitEpsilon, s.MaxDistance, s.NormalEpsilon, s.ShadowSoftness),
             MarchB = new Vector4(s.AOStepDistance, s.AOIntensity, 0, 0),
@@ -188,6 +195,11 @@ public sealed class RaymarchPipeline : IDisposable
                 s.F0),
         };
     }
+
+    /// <summary>sRGB electro-optical transfer (decode): display value -> linear
+    /// light. Inverse of the encode in the finalize shader.</summary>
+    private static float SrgbToLinear(float c) =>
+        c <= 0.04045f ? c / 12.92f : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
 
     /// <summary>Halton(2,3) sub-pixel jitter for sample index. Returns offset
     /// in [-0.5, 0.5] x [-0.5, 0.5]. Low-discrepancy quasi-random; produces
@@ -276,13 +288,23 @@ layout(std430, binding = 3) readonly buffer AAParams {
     int pad0;
 } aa;
 
+// Linear light -> sRGB display encoding. The accumulator is linear (shading
+// happens there so SSAA averaging is physically correct); packing without
+// this encode crushes midtones and the whole render reads dark.
+vec3 linearToSrgb(vec3 c) {
+    vec3 lo = c * 12.92;
+    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+    return mix(lo, hi, step(vec3(0.0031308), c));
+}
+
 void main() {
     int px = int(gl_GlobalInvocationID.x);
     int py = int(gl_GlobalInvocationID.y);
     if (px >= aa.width || py >= aa.height) return;
     int idx = py * aa.width + px;
     vec4 c = accum.colors[idx] / float(aa.sampleCount);
-    uvec3 q = uvec3(clamp(c.rgb, 0.0, 1.0) * 255.0 + 0.5);
+    vec3 srgb = linearToSrgb(clamp(c.rgb, 0.0, 1.0));
+    uvec3 q = uvec3(srgb * 255.0 + 0.5);
     img.pixels[idx] = (255u << 24) | (q.b << 16) | (q.g << 8) | q.r;
 }
 ";
