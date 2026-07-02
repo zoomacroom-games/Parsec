@@ -55,10 +55,13 @@ internal struct RenderParamsGpu
 /// <summary>
 /// A placeable emissive sphere light: rays that hit it show a luminous orb,
 /// and every fractal hit receives its diffuse contribution as a point light
-/// with inverse-square falloff. Public API type -- the App layer builds these;
+/// with inverse-square falloff. Color is authored sRGB in [0,1] per channel
+/// (the shader decodes to linear); it tints both the visible orb and its
+/// light. Public API type -- the App layer builds these;
 /// <see cref="RaymarchPipeline.SetOrbs"/> packs them into the GPU layout.
 /// </summary>
-public readonly record struct OrbLight(Vector3 Position, float Radius, float Luminosity);
+public readonly record struct OrbLight(
+    Vector3 Position, float Radius, float Luminosity, Vector3 Color);
 
 /// <summary>
 /// GPU layout for one orb (binding 10). Matches the OrbData SSBO in

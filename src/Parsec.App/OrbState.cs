@@ -3,12 +3,15 @@ using Parsec.Rendering.Raymarching;
 
 namespace Parsec.App;
 
-/// <summary>One placeable luminous orb: position, size, and light output.</summary>
+/// <summary>One placeable luminous orb: position, size, light output, and
+/// color (authored sRGB, tints both the visible orb and its light). Defaults
+/// to the original warm white.</summary>
 public sealed class Orb
 {
     public float X, Y, Z;
     public float Radius = 0.12f;
     public float Luminosity = 3.0f;
+    public float R = 1.0f, G = 0.9f, B = 0.75f;
 }
 
 /// <summary>
@@ -52,7 +55,8 @@ public sealed class OrbState
     /// <summary>Snapshot for the render pipeline.</summary>
     public IReadOnlyList<OrbLight> ToLights() =>
         _orbs.Select(o => new OrbLight(
-            new Vector3(o.X, o.Y, o.Z), o.Radius, o.Luminosity)).ToArray();
+            new Vector3(o.X, o.Y, o.Z), o.Radius, o.Luminosity,
+            new Vector3(o.R, o.G, o.B))).ToArray();
 
     public ParamSchema BuildSchema()
     {
@@ -81,6 +85,20 @@ public sealed class OrbState
                 Label = $"{group} luminosity", Group = group,
                 Min = 0, Max = 10, Decimals = 2,
                 Get = () => orb.Luminosity, Set = v => orb.Luminosity = (float)v });
+            // Color as R/G/B sliders, matching the palette's Base R/G/B idiom
+            // (and keyframeable, so orb hues can animate).
+            ps.Add(new ParamDescriptor {
+                Label = $"{group} R", Group = group,
+                Min = 0, Max = 1, Decimals = 2,
+                Get = () => orb.R, Set = v => orb.R = (float)v });
+            ps.Add(new ParamDescriptor {
+                Label = $"{group} G", Group = group,
+                Min = 0, Max = 1, Decimals = 2,
+                Get = () => orb.G, Set = v => orb.G = (float)v });
+            ps.Add(new ParamDescriptor {
+                Label = $"{group} B", Group = group,
+                Min = 0, Max = 1, Decimals = 2,
+                Get = () => orb.B, Set = v => orb.B = (float)v });
         }
         return new ParamSchema { Parameters = ps };
     }

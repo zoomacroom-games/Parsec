@@ -46,10 +46,6 @@ public sealed class RaymarchPipeline : IDisposable
     /// bound the shader uses and the slot count uploaded every render).</summary>
     public const int MaxOrbs = 8;
 
-    // Orbs are authored in sRGB-ish warm white; the shader decodes authored
-    // colors, so this is the displayed tint of a fully saturated orb face.
-    private static readonly Vector3 OrbColor = new(1.0f, 0.9f, 0.75f);
-
     private readonly Gl _gl;
     private readonly StorageBuffer<FoldParamsGpu> _foldBuffer;
     private readonly StorageBuffer<RenderParamsGpu> _renderBuffer;
@@ -94,7 +90,9 @@ public sealed class RaymarchPipeline : IDisposable
                 _orbData[i] = new OrbGpu
                 {
                     PosRad = new Vector4(o.Position, MathF.Max(0f, o.Radius)),
-                    ColorLum = new Vector4(OrbColor, MathF.Max(0f, o.Luminosity)),
+                    ColorLum = new Vector4(
+                        Vector3.Clamp(o.Color, Vector3.Zero, Vector3.One),
+                        MathF.Max(0f, o.Luminosity)),
                 };
             }
             else
