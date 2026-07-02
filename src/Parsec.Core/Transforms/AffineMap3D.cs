@@ -243,43 +243,53 @@ public readonly struct AffineMap3D : IEquatable<AffineMap3D>
     /// A map is contractive iff this is &lt; 1.
     /// </summary>
     /// <remarks>
-    /// Uses power iteration on M^T M. Converges quickly (typically &lt; 20 iterations)
-    /// for non-degenerate matrices. For exact closed-form, we'd need cubic eigenvalue
-    /// solving; power iteration is simpler and good enough for the contraction check.
+    /// Computed exactly as sqrt(λ_max(MᵀM)) via the trigonometric closed form for
+    /// symmetric 3x3 eigenvalues, in double precision. This value is a Lipschitz
+    /// bound consumed by the IFS distance estimator (sphere-radius propagation),
+    /// so it must never be UNDERestimated — the previous power iteration could
+    /// converge on a sub-dominant eigenvalue when the dominant eigenvector was
+    /// near-orthogonal to its fixed start vector, and an under-reported norm
+    /// makes the DE overstep real geometry (holes in renders). The closed form
+    /// is exact up to rounding and cheaper than 30 iterations.
     /// </remarks>
     public float SpectralNorm
     {
         get
         {
-            // Build A = M^T * M (symmetric positive semi-definite).
-            float a00 = M00 * M00 + M10 * M10 + M20 * M20;
-            float a11 = M01 * M01 + M11 * M11 + M21 * M21;
-            float a22 = M02 * M02 + M12 * M12 + M22 * M22;
-            float a01 = M00 * M01 + M10 * M11 + M20 * M21;
-            float a02 = M00 * M02 + M10 * M12 + M20 * M22;
-            float a12 = M01 * M02 + M11 * M12 + M21 * M22;
+            // Build A = MᵀM (symmetric PSD) in double to avoid float cancellation.
+            double a00 = (double)M00 * M00 + (double)M10 * M10 + (double)M20 * M20;
+            double a11 = (double)M01 * M01 + (double)M11 * M11 + (double)M21 * M21;
+            double a22 = (double)M02 * M02 + (double)M12 * M12 + (double)M22 * M22;
+            double a01 = (double)M00 * M01 + (double)M10 * M11 + (double)M20 * M21;
+            double a02 = (double)M00 * M02 + (double)M10 * M12 + (double)M20 * M22;
+            double a12 = (double)M01 * M02 + (double)M11 * M12 + (double)M21 * M22;
 
-            // Power iteration for the largest eigenvalue of A.
-            // Start with a generic vector to avoid landing in a null eigenvector by accident.
-            float vx = 0.577f, vy = 0.577f, vz = 0.577f;
-            float lambda = 0f;
-            for (int i = 0; i < 30; i++)
+            double p1 = a01 * a01 + a02 * a02 + a12 * a12;
+            double lambdaMax;
+            if (p1 == 0.0)
             {
-                // w = A * v
-                float wx = a00 * vx + a01 * vy + a02 * vz;
-                float wy = a01 * vx + a11 * vy + a12 * vz;
-                float wz = a02 * vx + a12 * vy + a22 * vz;
-
-                float norm = MathF.Sqrt(wx * wx + wy * wy + wz * wz);
-                if (norm < 1e-20f) return 0f;
-                float inv = 1f / norm;
-                vx = wx * inv; vy = wy * inv; vz = wz * inv;
-
-                float prev = lambda;
-                lambda = norm;
-                if (MathF.Abs(lambda - prev) < 1e-7f * lambda) break;
+                // A is diagonal; the eigenvalues are the diagonal entries.
+                lambdaMax = Math.Max(a00, Math.Max(a11, a22));
             }
-            return MathF.Sqrt(MathF.Max(0f, lambda));
+            else
+            {
+                // Smith's trigonometric solution of the characteristic cubic.
+                // λ_max = q + 2p·cos(acos(det(B)/2)/3) with B = (A − qI)/p,
+                // the largest of the three real roots for symmetric A.
+                double q = (a00 + a11 + a22) / 3.0;
+                double p2 = (a00 - q) * (a00 - q) + (a11 - q) * (a11 - q)
+                          + (a22 - q) * (a22 - q) + 2.0 * p1;
+                double p = Math.Sqrt(p2 / 6.0);
+                double b00 = (a00 - q) / p, b11 = (a11 - q) / p, b22 = (a22 - q) / p;
+                double b01 = a01 / p, b02 = a02 / p, b12 = a12 / p;
+                double detB = b00 * (b11 * b22 - b12 * b12)
+                            - b01 * (b01 * b22 - b12 * b02)
+                            + b02 * (b01 * b12 - b11 * b02);
+                double r = Math.Clamp(detB / 2.0, -1.0, 1.0);
+                double phi = Math.Acos(r) / 3.0;
+                lambdaMax = q + 2.0 * p * Math.Cos(phi);
+            }
+            return (float)Math.Sqrt(Math.Max(0.0, lambdaMax));
         }
     }
 
