@@ -166,6 +166,11 @@ public sealed class RaymarchPipeline : IDisposable
         for (int sample = 0; sample < samples; sample++)
         {
             var jitter = (samples == 1) ? Vector2.Zero : HaltonJitter(sample);
+            // Lens sample for thin-lens DOF: a unit-disc point per AA sample,
+            // averaged by the same accumulation as the subpixel jitter. Zeroed
+            // at 1 sample -- a single lens offset would just shift the image,
+            // not blur it, so the preview stays a sharp pinhole.
+            var lens = (samples == 1) ? Vector2.Zero : LensSample(sample);
 
             for (int tile = 0; tile < tiles; tile++)
             {
@@ -175,7 +180,7 @@ public sealed class RaymarchPipeline : IDisposable
                 _renderBuffer.Upload(new[] { BuildRenderParams(
                     width, height, rowOffset, rowCount, frame, camera,
                     lightDir, background, surface, settings, palette, flags, jitter,
-                    _orbCount) });
+                    lens, _orbCount) });
                 _renderBuffer.BindBase(4);
 
                 int groupsX = (width + 7) / 8;
@@ -205,7 +210,8 @@ public sealed class RaymarchPipeline : IDisposable
         int width, int height, int rowOffset, int rowCount,
         CameraFrame frame, Camera3D camera, Vector3 lightDir,
         Color background, Color surface, RaymarchSettings s,
-        PaletteParams palette, int flags, Vector2 jitter, int orbCount)
+        PaletteParams palette, int flags, Vector2 jitter, Vector2 lens,
+        int orbCount)
     {
         return new RenderParamsGpu
         {
@@ -215,7 +221,9 @@ public sealed class RaymarchPipeline : IDisposable
             CamForward = new Vector4(frame.Forward, 0),
             CamRight = new Vector4(frame.Right, 0),
             CamUp = new Vector4(frame.Up, 0),
-            TanFov = new Vector4(frame.TanFovX, frame.TanFovY, 0, 0),
+            // zw = (focus distance, aperture radius) for thin-lens DOF.
+            TanFov = new Vector4(frame.TanFovX, frame.TanFovY,
+                                 s.FocusDistance, s.Aperture),
             LightDir = new Vector4(lightDir, s.LightIntensity),
             // The shader shades in linear light and the finalize pass sRGB-encodes,
             // so the authored background must be decoded here to survive the
@@ -234,7 +242,8 @@ public sealed class RaymarchPipeline : IDisposable
             PalAmp = new Vector4(palette.Amp, palette.TrapScale),
             PalPhase = new Vector4(palette.Phase, palette.ShellMix),
             TrapMix = new Vector4(palette.TrapMix, 0f),
-            SubpixelJitter = new Vector4(jitter.X, jitter.Y, 0, 0),
+            // zw = this sample's unit-disc lens point (thin-lens DOF).
+            SubpixelJitter = new Vector4(jitter.X, jitter.Y, lens.X, lens.Y),
             ReflectParams = new Vector4(
                 s.EnableReflections ? 1f : 0f,
                 s.ReflectionBounces,
@@ -247,6 +256,17 @@ public sealed class RaymarchPipeline : IDisposable
     /// light. Inverse of the encode in the finalize shader.</summary>
     private static float SrgbToLinear(float c) =>
         c <= 0.04045f ? c / 12.92f : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+
+    /// <summary>Uniform unit-disc lens point for AA sample index, via polar
+    /// mapping of Halton(5,7) — bases disjoint from the subpixel jitter's
+    /// (2,3) so lens and pixel positions don't correlate.</summary>
+    private static Vector2 LensSample(int sampleIndex)
+    {
+        int n = sampleIndex + 1;
+        float r = MathF.Sqrt(Halton(n, 5));
+        float theta = 2f * MathF.PI * Halton(n, 7);
+        return new Vector2(r * MathF.Cos(theta), r * MathF.Sin(theta));
+    }
 
     /// <summary>Halton(2,3) sub-pixel jitter for sample index. Returns offset
     /// in [-0.5, 0.5] x [-0.5, 0.5]. Low-discrepancy quasi-random; produces

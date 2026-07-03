@@ -88,6 +88,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// <summary>Placeable luminous orbs, shared across all 3D fractals.</summary>
     public OrbState Orbs { get; } = new();
 
+    /// <summary>Thin-lens depth of field, shared across all 3D fractals.</summary>
+    public DofState Dof { get; } = new();
+
     /// <summary>Which fractal is currently displayed.</summary>
     public FractalType ActiveType { get; private set; } = FractalType.Kifs;
 
@@ -162,6 +165,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         combined.AddRange(Palette.BuildSchema().Parameters);
         combined.AddRange(Reflection.BuildSchema().Parameters);
         combined.AddRange(Light.BuildSchema().Parameters);
+        combined.AddRange(Dof.BuildSchema().Parameters);
         combined.AddRange(Orbs.BuildSchema().Parameters);
         return new ParamSchema { Parameters = combined };
     }
@@ -1037,7 +1041,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         ReflectionBounces: Reflection.Bounces,
         Gloss: Reflection.Gloss,
         F0: Reflection.F0,
-        LightIntensity: Light.Intensity);
+        LightIntensity: Light.Intensity,
+        FocusDistance: Dof.FocusDistance,
+        Aperture: Dof.Aperture);
 
     // High quality for the hero still: more march steps, finer hit/normal
     // epsilon, soft shadows on, more AO samples. The tiled path keeps it
@@ -1138,7 +1144,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         ReflectionBounces: Reflection.Bounces,
         Gloss: Reflection.Gloss,
         F0: Reflection.F0,
-        LightIntensity: Light.Intensity);
+        LightIntensity: Light.Intensity,
+        FocusDistance: Dof.FocusDistance,
+        Aperture: Dof.Aperture);
 
     private const string BlitVertexSrc = @"#version 430 core
 out vec2 vUv;

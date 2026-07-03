@@ -385,6 +385,21 @@ void main() {
     vec3 ro = rp.camPos.xyz;
     vec3 rd = normalize(rp.camForward.xyz + x * rp.camRight.xyz + y * rp.camUp.xyz);
 
+    // Thin-lens depth of field. tanFov.z = focus distance, tanFov.w = aperture
+    // radius; subpixelJitter.zw = this AA sample's unit-disc lens point (zeroed
+    // by the pipeline at 1 sample, so previews stay a sharp pinhole). All rays
+    // through the lens converge on the focal PLANE (the forward-projection
+    // divide keeps it flat), so geometry there is sharp and blur grows with
+    // distance from it. Averaging over the SSAA samples produces the bokeh.
+    float aperture = rp.tanFov.w;
+    vec2 lens = rp.subpixelJitter.zw;
+    if (aperture > 0.0 && (lens.x != 0.0 || lens.y != 0.0)) {
+        float ft = rp.tanFov.z / max(dot(rd, rp.camForward.xyz), 1e-4);
+        vec3 focusPoint = ro + rd * ft;
+        ro += (rp.camRight.xyz * lens.x + rp.camUp.xyz * lens.y) * aperture;
+        rd = normalize(focusPoint - ro);
+    }
+
     // Reflection controls.
     bool  reflectOn  = rp.reflectParams.x > 0.5;
     int   maxBounces = int(rp.reflectParams.y);

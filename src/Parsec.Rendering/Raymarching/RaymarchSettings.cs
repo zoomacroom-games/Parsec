@@ -28,4 +28,9 @@ public sealed record RaymarchSettings(
     int ReflectionBounces = 2,
     float Gloss = 0.5f,
     float F0 = 0.05f,
-    float LightIntensity = 1f);
+    float LightIntensity = 1f,
+    // Thin-lens depth of field. Aperture 0 = pinhole (off). Blur is averaged
+    // across the SSAA samples, so it needs HeroSamples >= 4 to resolve; the
+    // pipeline zeroes the lens jitter at 1 sample (preview stays sharp).
+    float FocusDistance = 2.5f,
+    float Aperture = 0f);
