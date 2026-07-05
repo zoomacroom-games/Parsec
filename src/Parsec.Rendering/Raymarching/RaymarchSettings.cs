@@ -30,7 +30,15 @@ public sealed record RaymarchSettings(
     float F0 = 0.05f,
     float LightIntensity = 1f,
     // Thin-lens depth of field. Aperture 0 = pinhole (off). Blur is averaged
-    // across the SSAA samples, so it needs HeroSamples >= 4 to resolve; the
-    // pipeline zeroes the lens jitter at 1 sample (preview stays sharp).
+    // across the SSAA samples, so it needs several samples to resolve; the
+    // pipeline zeroes the lens jitter for a single-sample render (a lone lens
+    // offset would shift the image, not blur it).
     float FocusDistance = 2.5f,
-    float Aperture = 0f);
+    float Aperture = 0f,
+    // Progressive accumulation: how many samples are ALREADY in the GPU
+    // accumulator from previous calls at this resolution. 0 (default) starts a
+    // fresh render (clears the accumulator); > 0 skips the clear, continues
+    // the jitter/lens sample sequence from this index, and finalizes with the
+    // running total. Used by the interactive preview to refine DOF/AA in place
+    // while the camera is idle; hero and CLI renders leave it at 0.
+    int SampleOffset = 0);

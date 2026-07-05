@@ -126,21 +126,32 @@ public sealed class RaymarchPipeline : IDisposable
         int samples = Math.Max(1, heroSamples);
         int pixelCount = width * height;
 
-        _accumBuffer.Allocate(pixelCount);
+        // Progressive accumulation: SampleOffset > 0 means the accumulator
+        // already holds that many samples of this exact scene at this exact
+        // resolution, so skip the clear and continue the sample sequence. A
+        // (re)allocation invalidates the old contents, so it forces a fresh
+        // start regardless of what the caller asked for.
+        int sampleOffset = Math.Max(0, settings.SampleOffset);
+        bool reallocated = _accumBuffer.Allocate(pixelCount);
         _imageBuffer.Allocate(pixelCount);
+        if (reallocated) sampleOffset = 0;
 
         // Upload params that are constant across the whole render.
         _foldBuffer.Upload(new[] { foldParams });
         _aaParamsBuffer.Upload(new[] { new AAParamsGpu {
-            Width = width, Height = height, SampleCount = samples, Pad0 = 0,
+            Width = width, Height = height,
+            SampleCount = sampleOffset + samples, Pad0 = 0,
         }});
 
-        // Clear the accumulator.
-        _accumBuffer.BindBase(5);
-        _aaParamsBuffer.BindBase(3);
-        _clearShader.Use();
-        _clearShader.Dispatch((width + 7) / 8, (height + 7) / 8);
-        _gl.MemoryBarrier(GlConst.ShaderStorageBarrierBit);
+        // Clear the accumulator (only when starting fresh).
+        if (sampleOffset == 0)
+        {
+            _accumBuffer.BindBase(5);
+            _aaParamsBuffer.BindBase(3);
+            _clearShader.Use();
+            _clearShader.Dispatch((width + 7) / 8, (height + 7) / 8);
+            _gl.MemoryBarrier(GlConst.ShaderStorageBarrierBit);
+        }
 
         // Pre-build the camera frame and lighting; these don't change between
         // AA samples (only the sub-pixel jitter does).
@@ -163,14 +174,18 @@ public sealed class RaymarchPipeline : IDisposable
         _orbBuffer.BindBase(10);
         fractalShader.Use();
 
+        // Jitter/lens indices continue the global sequence across progressive
+        // calls. A single-sample fresh render stays a centered pinhole (one
+        // jittered/lens-offset sample alone would shift the image, not
+        // antialias or blur it); once accumulation is in play every sample
+        // draws from the sequence.
+        bool multiSample = sampleOffset + samples > 1;
         for (int sample = 0; sample < samples; sample++)
         {
-            var jitter = (samples == 1) ? Vector2.Zero : HaltonJitter(sample);
+            var jitter = multiSample ? HaltonJitter(sampleOffset + sample) : Vector2.Zero;
             // Lens sample for thin-lens DOF: a unit-disc point per AA sample,
-            // averaged by the same accumulation as the subpixel jitter. Zeroed
-            // at 1 sample -- a single lens offset would just shift the image,
-            // not blur it, so the preview stays a sharp pinhole.
-            var lens = (samples == 1) ? Vector2.Zero : LensSample(sample);
+            // averaged by the same accumulation as the subpixel jitter.
+            var lens = multiSample ? LensSample(sampleOffset + sample) : Vector2.Zero;
 
             for (int tile = 0; tile < tiles; tile++)
             {

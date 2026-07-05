@@ -173,6 +173,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// <summary>Request a re-render (e.g. after a parameter change from the panel).</summary>
     public void MarkDirty()
     {
+        _expectRefine = false;   // scene changed: restart DOF refinement from a fresh base frame
         _dirty = true;
         RequestNextFrameRendering();
     }
@@ -187,6 +188,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     public void RequestAttractorRegen()
     {
         _attractorNeedsRegen = true;
+        _expectRefine = false;
         _dirty = true;
         RequestNextFrameRendering();
     }
@@ -285,6 +287,26 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     private DateTime _lastTick = DateTime.UtcNow;
 
     private DispatcherTimer? _moveTimer;
+
+    // Progressive DOF preview: when the aperture is open, the idle preview
+    // re-renders with an accumulation offset so thin-lens blur (and AA)
+    // refines in place on top of the sharp base frame. _previewAccum counts
+    // samples currently in the pipeline's accumulator for the on-screen
+    // frame; _expectRefine marks that the NEXT dirty render is one of our
+    // refinement passes rather than a fresh scene (any real change clears it
+    // via MarkDirty, which restarts from a sharp base frame).
+    private int _previewAccum;
+    private int _previewSampleOffset;
+    private bool _expectRefine;
+
+    private bool CanRefineDofPreview() =>
+        ActiveType != FractalType.DeepZoom
+        && Dof.Aperture > 0f
+        && _previewAccum >= 1
+        && _previewAccum < Math.Max(1, Dof.PreviewSamples)
+        && !_looking
+        && _keysDown.Count == 0
+        && !(ActiveType == FractalType.Attractor && _attractorHash == null);
 
     // Deep-zoom adaptive resolution: while panning/zooming we render at a reduced
     // scale (targeting a known-interactive pixel budget) for responsiveness, then
@@ -704,6 +726,12 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
 
         if (_dirty && !(ActiveType == FractalType.Attractor && _attractorHash == null))
         {
+            // Consume the refinement flag: a scheduled DOF refinement pass
+            // renders with an accumulation offset; anything else (param edit,
+            // camera move, fractal switch) starts a fresh 1-sample base frame.
+            _previewSampleOffset = _expectRefine ? _previewAccum : 0;
+            _expectRefine = false;
+
             var camera = _cam.ToCamera(PreviewWidth, PreviewHeight);
             // Orb lights ride shared pipeline state (binding 10), so one call
             // covers every renderer in the switch below. DeepZoom ignores it.
@@ -919,11 +947,25 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
             }
             _texW = rw; _texH = rh;
             _dirty = false;
+            // The accumulator now holds offset+1 samples of this frame (deep
+            // zoom has its own pipeline and never refines).
+            _previewAccum = ActiveType == FractalType.DeepZoom ? 0 : _previewSampleOffset + 1;
             bool atMaxDepth = ActiveType == FractalType.DeepZoom
                 && _deepView.Radius <= DeepZoomView.MinRadius * 1.05;
             Status(ActiveType == FractalType.DeepZoom
                 ? $"Deep Zoom 2D · {(_deepView.Formula switch { 1 => "Prospector", 2 => "Julia", 3 => "Burning Ship", _ => "Mandelbrot" })} · radius {_deepView.Radius:e2}{(atMaxDepth ? " · max depth" : "")} · {rw}x{rh} · drag pan · scroll zoom"
                 : $"pos ({_cam.Position.X:F2}, {_cam.Position.Y:F2}, {_cam.Position.Z:F2})  ·  WASD+QE move · drag to look");
+        }
+
+        // Progressive DOF: while the camera is idle and the aperture is open,
+        // schedule another pass through the render path above with an
+        // accumulation offset -- the preview refines from a sharp pinhole to
+        // converged thin-lens blur, one sample per frame.
+        if (!_dirty && CanRefineDofPreview())
+        {
+            _expectRefine = true;
+            _dirty = true;
+            RequestNextFrameRendering();
         }
 
         _gl.BindFramebuffer(GlConst.Framebuffer, (uint)fb);
@@ -1043,7 +1085,8 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         F0: Reflection.F0,
         LightIntensity: Light.Intensity,
         FocusDistance: Dof.FocusDistance,
-        Aperture: Dof.Aperture);
+        Aperture: Dof.Aperture,
+        SampleOffset: _previewSampleOffset);   // progressive DOF refinement (0 = fresh frame)
 
     // High quality for the hero still: more march steps, finer hit/normal
     // epsilon, soft shadows on, more AO samples. The tiled path keeps it
@@ -1055,6 +1098,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// </summary>
     private SkiaSharp.SKBitmap RenderActiveTo(int width, int height)
     {
+        // Hero renders reuse the pipeline's accumulator at a different size;
+        // whatever the preview had accumulated is gone. Restart refinement
+        // from the base frame the callers queue up afterwards (_dirty = true).
+        _previewAccum = 0;
         var cam = _cam.ToCamera(width, height);
         var bg = new Color(0.02f, 0.03f, 0.07f);
         var light = Light.ToDirection();

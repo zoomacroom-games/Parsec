@@ -114,6 +114,26 @@ public static class Program
             }
         }
 
+        if (args[0] is "gpu-progressive-validate")
+        {
+            // Validates the progressive-accumulation path (RaymarchSettings.
+            // SampleOffset, used by the app's DOF preview refinement): one
+            // 8-sample render must match the same scene accumulated as eight
+            // 1-sample calls with offsets 0..7.
+            try
+            {
+                using var ctx = new Parsec.Rendering.Gpu.HeadlessGLContext();
+                Console.WriteLine("GPU progressive accumulation validation");
+                Console.WriteLine(ctx.Info());
+                return Parsec.Rendering.Gpu.GpuRenders.ValidateProgressiveAccumulation(ctx.Gl) ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"gpu-progressive-validate FAILED: {ex.Message}");
+                return 1;
+            }
+        }
+
         if (args[0] is "gpu-render")
         {
             if (args.Length < 2)

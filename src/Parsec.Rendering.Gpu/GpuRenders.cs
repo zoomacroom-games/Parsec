@@ -414,6 +414,59 @@ public static class GpuRenders
             progress: progress);
     }
 
+    /// <summary>
+    /// Validates progressive accumulation (RaymarchSettings.SampleOffset): a
+    /// single 8-sample DOF render and the same scene accumulated as two
+    /// 4-sample calls (offsets 0 and 4) must produce identical pixels -- both
+    /// walk the same jitter/lens sequence and accumulate in the same order.
+    /// (A 1-sample fresh render is deliberately NOT part of the sequence: it
+    /// renders the centered pinhole sample so the interactive base frame stays
+    /// sharp, so it can't be compared bit-for-bit against a one-shot.)
+    /// Used by the app's interactive DOF preview refinement.
+    /// </summary>
+    public static bool ValidateProgressiveAccumulation(Gl gl)
+    {
+        const int W = 320, H = 240, Samples = 8;
+        using var __pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuQuaternionJuliaRenderer(gl, __pipeline);
+        var qj = new QuaternionJuliaParams();   // canonical half-cut defaults
+        var camera = new Camera3D(
+            position: new Vector3(2.2f, 1.5f, 2.6f),
+            lookAt: Vector3.Zero,
+            up: Vector3.UnitY,
+            verticalFovRadians: MathF.PI / 4.5f,
+            aspectRatio: (float)W / H);
+        var baseSettings = new RaymarchSettings(
+            MaxSteps: 160, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
+            EnableSoftShadows: false, ShadowSteps: 0,
+            EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.05f,
+            FocusDistance: 2.5f, Aperture: 0.08f);
+        var bg = new Color(0.02f, 0.03f, 0.07f);
+        var surf = Color.Rgb(210, 180, 150);
+        var light = new Vector3(0.4f, 0.8f, 0.4f);
+
+        uint[] oneShot = renderer.RenderToBuffer(qj, camera, W, H,
+            baseSettings with { HeroSamples = Samples }, bg, surf, light,
+            PaletteParams.Default);
+
+        uint[] progressive = Array.Empty<uint>();
+        for (int s = 0; s < Samples; s += 4)
+        {
+            progressive = renderer.RenderToBuffer(qj, camera, W, H,
+                baseSettings with { HeroSamples = 4, SampleOffset = s }, bg, surf, light,
+                PaletteParams.Default);
+        }
+
+        int diffs = 0;
+        for (int i = 0; i < oneShot.Length; i++)
+            if (oneShot[i] != progressive[i]) diffs++;
+
+        Console.WriteLine(diffs == 0
+            ? $"  PASS: 8-sample one-shot == 2x progressive 4-sample ({W}x{H}, {oneShot.Length} px)"
+            : $"  FAIL: {diffs}/{oneShot.Length} pixels differ");
+        return diffs == 0;
+    }
+
     private static SKBitmap RenderQuaternionJuliaFibers(Gl gl, int width, int height, Action<int, int>? progress)
     {
         using var __pipeline = new RaymarchPipeline(gl);

@@ -50,12 +50,16 @@ public sealed class StorageBuffer<T> : IDisposable where T : unmanaged
     }
 
     /// <summary>
-    /// Allocate without initializing. The buffer's contents are undefined
-    /// until something writes to them (typically a compute shader).
+    /// Allocate without initializing. At a NEW size the storage is recreated
+    /// and its contents are undefined until something writes to them; at the
+    /// SAME size the existing storage (and its contents) are kept, which lets
+    /// callers accumulate into a buffer across calls. Returns true if the
+    /// storage was (re)created, false if the existing allocation was reused.
     /// </summary>
-    public void Allocate(int elementCount, uint usage = 0)
+    public bool Allocate(int elementCount, uint usage = 0)
     {
         ThrowIfDisposed();
+        if (elementCount == ElementCount && elementCount > 0) return false;
         if (usage == 0) usage = GlConst.DynamicCopy;
         ElementCount = elementCount;
         _gl.BindBuffer(GlConst.ShaderStorageBuffer, Handle);
@@ -64,6 +68,7 @@ public sealed class StorageBuffer<T> : IDisposable where T : unmanaged
             IntPtr.Zero,
             usage);
         _gl.BindBuffer(GlConst.ShaderStorageBuffer, 0);
+        return true;
     }
 
     /// <summary>
