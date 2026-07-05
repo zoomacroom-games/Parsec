@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Parsec.Rendering.Raymarching;
 
 /// <summary>
@@ -41,4 +43,23 @@ public sealed record RaymarchSettings(
     // the jitter/lens sample sequence from this index, and finalizes with the
     // running total. Used by the interactive preview to refine DOF/AA in place
     // while the camera is idle; hero and CLI renders leave it at 0.
-    int SampleOffset = 0);
+    int SampleOffset = 0,
+    // Procedural skybox: replaces both the primary-miss background and the
+    // reflection environment with a zenith/horizon/ground gradient plus a sun
+    // glow that tracks the key light. Colors are authored sRGB. Off = legacy
+    // flat background (byte-identical output).
+    bool SkyboxEnable = false,
+    Vector3 SkyZenith = default,
+    Vector3 SkyHorizon = default,
+    Vector3 SkyGround = default,
+    float SunIntensity = 1.0f,
+    float SunSharpness = 96f,
+    // Reflective floor plane at y = FloorHeight (analytic, exact; the fractal
+    // still casts soft shadows and contact AO onto it). FloorReflect 0 = matte,
+    // 1 = mirror; the floor reflects the fractal even when the fractal's own
+    // glossy reflections are disabled. CheckerScale 0 = plain color.
+    bool FloorEnable = false,
+    float FloorHeight = -1.0f,
+    Vector3 FloorColor = default,
+    float FloorReflect = 0.4f,
+    float FloorCheckerScale = 0f);

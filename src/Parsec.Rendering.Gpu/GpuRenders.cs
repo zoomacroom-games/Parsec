@@ -28,6 +28,7 @@ public static class GpuRenders
         new Spec("qjulia",      "Quaternion Julia (half-cut) (GPU)"),
         new Spec("qjulia-traps", "Quaternion Julia with 3D orbit traps (iq) (GPU)"),
         new Spec("qjulia-fibers", "Quaternion Julia orbit-streamline fibers (iq) (GPU)"),
+        new Spec("qjulia-env",  "Quaternion Julia with skybox + reflective floor (GPU)"),
         new Spec("rotbox",      "Rotation-augmented Mandelbox (GPU)"),
         new Spec("hybrid",      "Rotated Mandelbox+Mandelbulb hybrid (GPU)"),
         new Spec("qjbox",       "Quaternion-Julia × Mandelbox hybrid (half-cut) (GPU)"),
@@ -53,6 +54,7 @@ public static class GpuRenders
             "qjulia"      => RenderQuaternionJulia(gl, width, height, progress),
             "qjulia-traps" => RenderQuaternionJuliaTraps(gl, width, height, progress),
             "qjulia-fibers" => RenderQuaternionJuliaFibers(gl, width, height, progress),
+            "qjulia-env"  => RenderQuaternionJuliaEnv(gl, width, height, progress),
             "rotbox"      => RenderRotBox(gl, width, height, progress),
             "hybrid"      => RenderHybrid(gl, width, height, progress),
             "qjbox"       => RenderQJBox(gl, width, height, progress),
@@ -406,6 +408,51 @@ public static class GpuRenders
                 MaxSteps: 300, HitEpsilon: 6e-4f, MaxDistance: 14f, NormalEpsilon: 6e-4f,
                 EnableSoftShadows: true, ShadowSteps: 40, ShadowSoftness: 12f,
                 EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(210, 180, 150),
+            lightDirection: new Vector3(0.4f, 0.8f, 0.4f),
+            palette: PaletteParams.Default,
+            tileRows: 32,
+            progress: progress);
+    }
+
+    private static SKBitmap RenderQuaternionJuliaEnv(Gl gl, int width, int height, Action<int, int>? progress)
+    {
+        using var __pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuQuaternionJuliaRenderer(gl, __pipeline);
+        // Environment showcase: the canonical half-cut Julia over a mirror
+        // floor, under a warm procedural sky whose sun tracks the key light.
+        // Exercises the skybox on primary misses, the sky in reflections, and
+        // the floor's fractal shadows + contact AO + mirror bounce.
+        var qj = new QuaternionJuliaParams
+        {
+            Iterations = 10,
+            C = new Vector4(-0.2f, 0.8f, 0f, 0f),
+            WSlice = 0f,
+            Cut = true,
+            CutAxis = 1,
+            PlaneOffset = 0f,
+        };
+        var camera = new Camera3D(
+            position: new Vector3(2.2f, 1.1f, 2.6f),
+            lookAt: new Vector3(0f, -0.15f, 0f),
+            up: Vector3.UnitY,
+            verticalFovRadians: MathF.PI / 4.5f,
+            aspectRatio: (float)width / height);
+
+        return renderer.Render(qj, camera, width, height,
+            new RaymarchSettings(
+                MaxSteps: 300, HitEpsilon: 6e-4f, MaxDistance: 30f, NormalEpsilon: 6e-4f,
+                EnableSoftShadows: true, ShadowSteps: 48, ShadowSoftness: 12f,
+                EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f,
+                SkyboxEnable: true,
+                SkyZenith: new Vector3(0.10f, 0.16f, 0.28f),
+                SkyHorizon: new Vector3(0.45f, 0.38f, 0.32f),
+                SkyGround: new Vector3(0.16f, 0.13f, 0.11f),
+                SunIntensity: 1.2f, SunSharpness: 96f,
+                FloorEnable: true, FloorHeight: -1.05f,
+                FloorColor: new Vector3(0.55f, 0.52f, 0.48f),
+                FloorReflect: 0.55f, FloorCheckerScale: 0f),
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(210, 180, 150),
             lightDirection: new Vector3(0.4f, 0.8f, 0.4f),

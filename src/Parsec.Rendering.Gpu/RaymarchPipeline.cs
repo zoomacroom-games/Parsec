@@ -264,6 +264,17 @@ public sealed class RaymarchPipeline : IDisposable
                 s.ReflectionBounces,
                 s.Gloss,
                 s.F0),
+            // Skybox + floor plane. Colors stay authored sRGB here; the shader
+            // decodes at use (same convention as the palette).
+            SkyParams = new Vector4(
+                s.SkyboxEnable ? 1f : 0f,
+                s.SunIntensity,
+                s.SunSharpness,
+                s.FloorEnable ? 1f : 0f),
+            SkyZenith = new Vector4(s.SkyZenith, s.FloorHeight),
+            SkyHorizon = new Vector4(s.SkyHorizon, s.FloorReflect),
+            SkyGround = new Vector4(s.SkyGround, s.FloorCheckerScale),
+            FloorColor = new Vector4(s.FloorColor, 0f),
         };
     }
 

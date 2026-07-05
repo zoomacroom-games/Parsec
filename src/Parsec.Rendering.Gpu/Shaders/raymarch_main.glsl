@@ -46,6 +46,14 @@ layout(std430, binding = 4) readonly buffer RenderParams {
     // Glossy reflection controls (hero-only, per-fractal opt-in):
     //   x = enable (0/1), y = max bounces, z = gloss [0,1], w = fresnel F0
     vec4  reflectParams;
+
+    // Environment: procedural skybox + reflective floor plane (both optional;
+    // zeroed = legacy flat background, no floor, byte-identical output).
+    vec4  skyParams;     // (skyMode 0/1, sun intensity, sun sharpness, floor enable 0/1)
+    vec4  skyZenith;     // (zenith rgb authored sRGB, floor height)
+    vec4  skyHorizon;    // (horizon rgb authored sRGB, floor reflectivity 0..1)
+    vec4  skyGround;     // (ground rgb authored sRGB, floor checker scale, 0 = plain)
+    vec4  floorColor;    // (floor rgb authored sRGB, _)
 } rp;
 
 layout(std430, binding = 5) buffer Accum {
@@ -193,6 +201,31 @@ vec3 environment(vec3 rd) {
 }
 
 // -----------------------------------------------------------------------------
+// Procedural skybox (skyParams.x == 1). Replaces BOTH the primary-miss
+// background and the reflection environment, so the sky seen behind the
+// fractal is the same sky its reflections see. Three authored colors blended
+// by ray elevation, plus a sun glow + disc tracking the key light direction.
+// -----------------------------------------------------------------------------
+vec3 skyColor(vec3 rd) {
+    vec3 zen = srgbToLinear(rp.skyZenith.rgb);
+    vec3 hor = srgbToLinear(rp.skyHorizon.rgb);
+    vec3 gnd = srgbToLinear(rp.skyGround.rgb);
+    // Below-horizon exponent kept gentle near 0 so the strip of sky between
+    // the horizon and the floor's distance-fog stays horizon-colored (a
+    // steeper curve leaves a visible seam against the fogged floor).
+    vec3 sky = (rd.y >= 0.0)
+        ? mix(hor, zen, pow(clamp(rd.y, 0.0, 1.0), 0.45))
+        : mix(hor, gnd, pow(clamp(-rd.y, 0.0, 1.0), 1.5));
+    float sun = max(0.0, dot(rd, rp.lightDir.xyz));
+    float sharp = max(rp.skyParams.z, 1.0);
+    float glow = pow(sun, sharp);           // broad halo
+    float disc = pow(sun, sharp * 32.0);    // hot core
+    sky += (vec3(1.0, 0.85, 0.70) * glow + vec3(1.0, 0.92, 0.80) * disc * 3.0)
+           * max(rp.skyParams.y, 0.0);
+    return sky;
+}
+
+// -----------------------------------------------------------------------------
 // Hit record + ray tracer. traceRay sphere-skips, marches, and (on hit) fills
 // position/normal/albedo. Pulled out of main() so the bounce loop can call it
 // for both the primary ray and each reflection ray.
@@ -200,6 +233,7 @@ vec3 environment(vec3 rd) {
 struct Hit {
     bool  hit;
     bool  emissive;   // hit an orb light: shade as emission, terminate path
+    bool  isFloor;    // hit the analytic floor plane (own reflectivity)
     vec3  pos;
     vec3  normal;
     vec3  albedo;
@@ -235,7 +269,8 @@ void intersectOrbs(vec3 ro, vec3 rd, inout Hit h, float tLimit) {
 
 Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int maxSteps) {
     Hit h;
-    h.hit = false; h.emissive = false; h.pos = vec3(0.0); h.normal = vec3(0.0);
+    h.hit = false; h.emissive = false; h.isFloor = false;
+    h.pos = vec3(0.0); h.normal = vec3(0.0);
     h.albedo = vec3(0.0); h.emission = vec3(0.0); h.t = maxDist;
 
     vec4 bsphere = attractorBoundingSphere();
@@ -297,6 +332,29 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
     // they are visible outside the attractor's bounding sphere and where the
     // fractal was missed. A nearer orb overrides the fractal hit.
     intersectOrbs(ro, rd, h, h.hit ? h.t : maxDist);
+
+    // Floor plane (skyParams.w == 1): analytic horizontal plane at
+    // y = skyZenith.w, exact intersection (no marching), two-sided. A nearer
+    // plane hit overrides whatever the ray found so far. The fractal's DE
+    // still drives the floor's shadows and contact AO via shadeDirect.
+    if (rp.skyParams.w > 0.5 && abs(rd.y) > 1e-6) {
+        float floorH = rp.skyZenith.w;
+        float tPlane = (floorH - ro.y) / rd.y;
+        float tLimit = h.hit ? h.t : maxDist;
+        if (tPlane > hitEps * 4.0 && tPlane < tLimit) {
+            vec3 pos = ro + rd * tPlane;
+            vec3 fc = srgbToLinear(rp.floorColor.rgb);
+            float checker = rp.skyGround.w;
+            if (checker > 0.0) {
+                vec2 q = floor(pos.xz * checker);
+                fc *= mix(0.70, 1.0, mod(q.x + q.y, 2.0));
+            }
+            h.hit = true; h.emissive = false; h.isFloor = true;
+            h.t = tPlane; h.pos = pos;
+            h.normal = vec3(0.0, (ro.y >= floorH) ? 1.0 : -1.0, 0.0);
+            h.albedo = fc;
+        }
+    }
     return h;
 }
 
@@ -405,19 +463,28 @@ void main() {
     int   maxBounces = int(rp.reflectParams.y);
     float gloss      = rp.reflectParams.z;
     float F0         = rp.reflectParams.w;
+    bool  skyOn      = rp.skyParams.x > 0.5;
+
+    // The floor's reflectivity works independently of the fractal's glossy
+    // reflections: a reflective floor gets at least one bounce so it can
+    // mirror the fractal even with reflections otherwise disabled.
+    bool floorReflective = rp.skyParams.w > 0.5 && rp.skyHorizon.w > 0.0;
+    int effMaxBounces = max(reflectOn ? maxBounces : 0, floorReflective ? 1 : 0);
 
     vec3 color = vec3(0.0);
     vec3 throughput = vec3(1.0);
 
-    // Fixed-depth bounce loop. With reflectOn == false this runs exactly once
-    // and reduces to the original single-bounce shading.
-    for (int bounce = 0; bounce <= maxBounces; bounce++) {
+    // Fixed-depth bounce loop. With reflections and the floor both off this
+    // runs exactly once and reduces to the original single-bounce shading.
+    for (int bounce = 0; bounce <= effMaxBounces; bounce++) {
         Hit h = traceRay(ro, rd, hitEps, maxDist, normalEps, maxSteps);
 
         if (!h.hit) {
-            // Primary miss -> flat background (keeps the composition). Reflection
-            // miss -> environment gradient (so glossy edges reflect a "world").
-            color += throughput * (bounce == 0 ? rp.background.rgb : environment(rd));
+            // With the skybox on, misses see the same sky everywhere (primary
+            // and reflections). Legacy: primary miss -> flat background,
+            // reflection miss -> environment gradient.
+            color += throughput * (skyOn ? skyColor(rd)
+                                 : (bounce == 0 ? rp.background.rgb : environment(rd)));
             break;
         }
 
@@ -430,17 +497,49 @@ void main() {
 
         vec3 direct = shadeDirect(h, hitEps, maxDist);
 
-        // Last allowed bounce, or reflections disabled: deposit direct and stop.
-        if (!reflectOn || bounce == maxBounces) {
+        // Distance fog on the floor: an infinite plane otherwise ends in a
+        // hard circle where t exceeds maxDist, with a visible seam against
+        // the sky. Fade distant floor into the horizon (at this azimuth) so
+        // it melts into the sky instead; the fog also damps reflectivity so
+        // the haze isn't mirror-sharp.
+        float floorFog = 0.0;
+        if (h.isFloor) {
+            floorFog = smoothstep(0.25, 1.0, h.t / maxDist);
+            if (floorFog > 0.0) {
+                vec3 hazeCol;
+                if (skyOn) {
+                    vec2 az = rd.xz;
+                    float l = max(length(az), 1e-4);
+                    hazeCol = skyColor(vec3(az.x / l, 0.0, az.y / l));
+                } else {
+                    hazeCol = rp.background.rgb;
+                }
+                direct = mix(direct, hazeCol, floorFog);
+            }
+        }
+
+        // Per-surface reflectivity: the floor uses its own strength (Schlick
+        // against water-like F0, blended toward full mirror as the slider
+        // rises); fractal surfaces use the glossy-reflection controls.
+        float reflectWeight = 0.0;
+        if (bounce < effMaxBounces) {
+            float cosTheta = clamp(dot(-rd, h.normal), 0.0, 1.0);
+            if (h.isFloor) {
+                float refl = clamp(rp.skyHorizon.w, 0.0, 1.0);
+                float fresnel = 0.04 + 0.96 * pow(1.0 - cosTheta, 5.0);
+                reflectWeight = clamp(refl * mix(fresnel, 1.0, refl), 0.0, 1.0)
+                              * (1.0 - floorFog);
+            } else if (reflectOn) {
+                float fresnel = F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+                reflectWeight = clamp(gloss * fresnel, 0.0, 1.0);
+            }
+        }
+
+        // No reflective continuation: deposit direct and stop.
+        if (reflectWeight <= 0.0) {
             color += throughput * direct;
             break;
         }
-
-        // Schlick fresnel: more reflective at grazing angles. cosTheta uses the
-        // incoming direction against the surface normal.
-        float cosTheta = clamp(dot(-rd, h.normal), 0.0, 1.0);
-        float fresnel = F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-        float reflectWeight = clamp(gloss * fresnel, 0.0, 1.0);
 
         // Split: diffuse part shaded now, reflective part carried to next bounce.
         // Reflections are left untinted (dielectric / ceramic look) -- a metal

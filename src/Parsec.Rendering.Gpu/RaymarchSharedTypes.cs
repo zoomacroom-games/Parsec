@@ -56,6 +56,14 @@ internal struct RenderParamsGpu
     public Vector4 PalBase, PalAmp, PalPhase, TrapMix;
     public Vector4 SubpixelJitter;   // (jx, jy, _, _) in [-0.5, 0.5]
     public Vector4 ReflectParams;    // (enable, maxBounces, gloss, F0)
+
+    // Environment: procedural skybox + reflective floor plane (raymarch_main).
+    // Zeroed = legacy flat background, no floor.
+    public Vector4 SkyParams;        // (skyMode 0/1, sun intensity, sun sharpness, floor enable)
+    public Vector4 SkyZenith;        // (zenith rgb sRGB, floor height)
+    public Vector4 SkyHorizon;       // (horizon rgb sRGB, floor reflectivity)
+    public Vector4 SkyGround;        // (ground rgb sRGB, floor checker scale)
+    public Vector4 FloorColor;       // (floor rgb sRGB, _)
 }
 
 /// <summary>
