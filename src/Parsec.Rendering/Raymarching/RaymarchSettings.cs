@@ -62,4 +62,8 @@ public sealed record RaymarchSettings(
     float FloorHeight = -1.0f,
     Vector3 FloorColor = default,
     float FloorReflect = 0.4f,
-    float FloorCheckerScale = 0f);
+    float FloorCheckerScale = 0f,
+    // Object-space fractal orientation, as Euler angles in RADIANS
+    // (X = pitch, Y = yaw, Z = roll). Zero = no rotation (byte-identical). The
+    // fractal spins in place; camera, lights, floor, and orbs stay fixed.
+    Vector3 FractalEulerRadians = default);

@@ -64,6 +64,12 @@ internal struct RenderParamsGpu
     public Vector4 SkyHorizon;       // (horizon rgb sRGB, floor reflectivity)
     public Vector4 SkyGround;        // (ground rgb sRGB, floor checker scale)
     public Vector4 FloorColor;       // (floor rgb sRGB, _)
+
+    // Object-space fractal rotation: columns of the object->world rotation R.
+    // Identity by default (byte-identical output).
+    public Vector4 FracRot0;
+    public Vector4 FracRot1;
+    public Vector4 FracRot2;
 }
 
 /// <summary>

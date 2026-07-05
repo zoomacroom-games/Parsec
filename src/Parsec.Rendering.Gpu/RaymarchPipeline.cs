@@ -228,6 +228,15 @@ public sealed class RaymarchPipeline : IDisposable
         PaletteParams palette, int flags, Vector2 jitter, Vector2 lens,
         int orbCount)
     {
+        // Object->world rotation R for the fractal. Columns are the rotated
+        // basis axes (R * e_i); the shader marches the DE at R^T * pWorld.
+        // Built via quaternion to dodge matrix row/column-convention pitfalls.
+        var e = s.FractalEulerRadians;
+        var q = Quaternion.CreateFromYawPitchRoll(e.Y, e.X, e.Z);
+        Vector3 rCol0 = Vector3.Transform(Vector3.UnitX, q);
+        Vector3 rCol1 = Vector3.Transform(Vector3.UnitY, q);
+        Vector3 rCol2 = Vector3.Transform(Vector3.UnitZ, q);
+
         return new RenderParamsGpu
         {
             ImageWidth = width, ImageHeight = height,
@@ -275,6 +284,9 @@ public sealed class RaymarchPipeline : IDisposable
             SkyHorizon = new Vector4(s.SkyHorizon, s.FloorReflect),
             SkyGround = new Vector4(s.SkyGround, s.FloorCheckerScale),
             FloorColor = new Vector4(s.FloorColor, 0f),
+            FracRot0 = new Vector4(rCol0, 0f),
+            FracRot1 = new Vector4(rCol1, 0f),
+            FracRot2 = new Vector4(rCol2, 0f),
         };
     }
 

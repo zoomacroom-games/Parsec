@@ -94,6 +94,9 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     /// <summary>Skybox + reflective floor plane, shared across all 3D fractals.</summary>
     public EnvironmentState Env { get; } = new();
 
+    /// <summary>Object-space fractal orientation, shared across all 3D fractals.</summary>
+    public RotationState Rotation { get; } = new();
+
     /// <summary>Which fractal is currently displayed.</summary>
     public FractalType ActiveType { get; private set; } = FractalType.Kifs;
 
@@ -170,6 +173,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         combined.AddRange(Light.BuildSchema().Parameters);
         combined.AddRange(Dof.BuildSchema().Parameters);
         combined.AddRange(Env.BuildSchema().Parameters);
+        combined.AddRange(Rotation.BuildSchema().Parameters);
         combined.AddRange(Orbs.BuildSchema().Parameters);
         return new ParamSchema { Parameters = combined };
     }
@@ -1078,7 +1082,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         return (w, h);
     }
 
-    private RaymarchSettings PreviewSettings() => WithEnvironment(new(
+    private RaymarchSettings PreviewSettings() => WithSharedLook(new(
         MaxSteps: 160, HitEpsilon: 1.5e-3f, MaxDistance: 40f, NormalEpsilon: 2e-3f,
         EnableSoftShadows: false, ShadowSteps: 0, ShadowSoftness: 12f,
         EnableAmbientOcclusion: true, AOSamples: 4, AOStepDistance: 0.05f, AOIntensity: 1.0f,
@@ -1092,9 +1096,10 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         Aperture: Dof.Aperture,
         SampleOffset: _previewSampleOffset));  // progressive DOF refinement (0 = fresh frame)
 
-    /// <summary>Layer the shared skybox/floor state onto a settings record
-    /// (same values for preview and hero, so the composition matches).</summary>
-    private RaymarchSettings WithEnvironment(RaymarchSettings s) => s with
+    /// <summary>Layer the shared look state (skybox, floor, fractal rotation)
+    /// onto a settings record — same values for preview and hero, so the
+    /// composition matches.</summary>
+    private RaymarchSettings WithSharedLook(RaymarchSettings s) => s with
     {
         SkyboxEnable = Env.SkyEnable >= 1,
         SkyZenith = new Vector3(Env.ZenithR, Env.ZenithG, Env.ZenithB),
@@ -1107,6 +1112,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
         FloorColor = new Vector3(Env.FloorR, Env.FloorG, Env.FloorB),
         FloorReflect = Env.FloorReflect,
         FloorCheckerScale = Env.FloorChecker,
+        FractalEulerRadians = Rotation.ToEulerRadians(),
     };
 
     // High quality for the hero still: more march steps, finer hit/normal
@@ -1203,7 +1209,7 @@ public sealed class FractalView : OpenGlControlBase, Avalonia.Rendering.ICustomH
     // home into -- at 6e-7 the marcher oversteps and misses it (full in the coarse
     // preview, sparse at hero). A coarse epsilon catches the same surface the preview
     // does, and the DE can't resolve finer than that anyway.
-    private RaymarchSettings HeroSettings(float eps) => WithEnvironment(new(
+    private RaymarchSettings HeroSettings(float eps) => WithSharedLook(new(
         MaxSteps: 400, HitEpsilon: eps, MaxDistance: 50f, NormalEpsilon: eps,
         EnableSoftShadows: true, ShadowSteps: 64, ShadowSoftness: 14f,
         EnableAmbientOcclusion: true, AOSamples: 6, AOStepDistance: 0.04f, AOIntensity: 1.0f,

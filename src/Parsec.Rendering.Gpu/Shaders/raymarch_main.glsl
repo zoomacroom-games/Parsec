@@ -54,6 +54,14 @@ layout(std430, binding = 4) readonly buffer RenderParams {
     vec4  skyHorizon;    // (horizon rgb authored sRGB, floor reflectivity 0..1)
     vec4  skyGround;     // (ground rgb authored sRGB, floor checker scale, 0 = plain)
     vec4  floorColor;    // (floor rgb authored sRGB, _)
+
+    // Object-space fractal rotation. Columns of the object->world rotation R
+    // (identity by default -> byte-identical). The DE is evaluated at
+    // R^T * pWorld, so the fractal spins in place while the camera, lights,
+    // floor, and orbs stay fixed in world space.
+    vec4  fracRot0;      // R column 0 (xyz)
+    vec4  fracRot1;      // R column 1 (xyz)
+    vec4  fracRot2;      // R column 2 (xyz)
 } rp;
 
 layout(std430, binding = 5) buffer Accum {
@@ -93,13 +101,27 @@ vec3 srgbToLinear(vec3 c) {
     return mix(lo, hi, step(vec3(0.04045), c));
 }
 
+// Object-space fractal rotation, set once per pixel in main() from the render
+// params. gObjToWorld is R (columns fracRot0/1/2); gWorldToObj is R^T. Default
+// identity so any evaluation before main() sees no rotation.
+mat3 gObjToWorld = mat3(1.0);
+mat3 gWorldToObj = mat3(1.0);
+
+// The DE, evaluated in the fractal's rotated frame: transform the world sample
+// point into object space, then call the core estimate(). Every fractal march
+// (primary, shadow, AO, normal, trap capture) routes through this so the whole
+// object spins together. Because estimateNormal finite-differences THIS
+// composed function, its gradient is already the world-space normal -- the
+// chain rule bakes the R back in -- so no separate normal rotation is needed.
+float estimateF(vec3 pWorld) { return estimate(gWorldToObj * pWorld); }
+
 vec3 estimateNormal(vec3 p, float eps, vec3 viewDir, out bool degenerate) {
     vec2 k = vec2(1.0, -1.0);
     vec3 n =
-        k.xyy * estimate(p + k.xyy * eps) +
-        k.yyx * estimate(p + k.yyx * eps) +
-        k.yxy * estimate(p + k.yxy * eps) +
-        k.xxx * estimate(p + k.xxx * eps);
+        k.xyy * estimateF(p + k.xyy * eps) +
+        k.yyx * estimateF(p + k.yyx * eps) +
+        k.yxy * estimateF(p + k.yxy * eps) +
+        k.xxx * estimateF(p + k.xxx * eps);
     float len = length(n);
     degenerate = !(len > 1e-6);
     return degenerate ? -viewDir : n / len;
@@ -116,7 +138,7 @@ float softShadow(vec3 origin, vec3 dir, float hitEps, float maxDist,
     float t = hitEps * 4.0;
     for (int i = 0; i < steps; i++) {
         vec3 p = origin + dir * t;
-        float d = estimate(p) * fudge;
+        float d = estimateF(p) * fudge;
         if (d < hitEps) return 0.0;
         result = min(result, softness * d / t);
         t += d;
@@ -132,7 +154,7 @@ float ambientOcclusion(vec3 p, vec3 normal, float stepDist, float intensity, int
     for (int i = 1; i <= samples; i++) {
         float stepLen = float(i) * stepDist;
         vec3 samplePoint = p + normal * stepLen;
-        float d = estimate(samplePoint) * fudge;
+        float d = estimateF(samplePoint) * fudge;
         occ += (stepLen - d) * weight;
         weight *= 0.5;
     }
@@ -273,9 +295,12 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
     h.pos = vec3(0.0); h.normal = vec3(0.0);
     h.albedo = vec3(0.0); h.emission = vec3(0.0); h.t = maxDist;
 
+    // The core's skip sphere is object-space; rotate its center into world so
+    // the enter test matches the rotated fractal (radius is rotation-invariant).
     vec4 bsphere = attractorBoundingSphere();
+    vec3 bcenter = gObjToWorld * bsphere.xyz;
     float tEnter;
-    if (intersectSphereForward(ro, rd, bsphere.xyz, bsphere.w, tEnter)) {
+    if (intersectSphereForward(ro, rd, bcenter, bsphere.w, tEnter)) {
         float t = max(0.0, tEnter);
         bool hit = false;
         float fudge = deFudge();
@@ -283,7 +308,7 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
         float lastD = 1e9;
         for (i = 0; i < maxSteps; i++) {
             vec3 p = ro + rd * t;
-            float d = estimate(p) * fudge;
+            float d = estimateF(p) * fudge;
             // Cone-scaled hit epsilon: stop when the surface is within ~half a
             // pixel's world-size at this distance, so detail resolves with
             // resolution/zoom instead of a fixed world threshold. hitEps acts as
@@ -311,8 +336,9 @@ Hit traceRay(vec3 ro, vec3 rd, float hitEps, float maxDist, float normalEps, int
         if (hit) {
             vec3 hitPoint = ro + rd * t;
             // Capture the orbit trap at the hit BEFORE normal estimation (which
-            // calls estimate() four times and clobbers gTrap).
-            estimate(hitPoint);
+            // calls estimateF() four times and clobbers gTrap). Evaluate in the
+            // rotated frame so the trap coloring rotates with the object.
+            estimateF(hitPoint);
             vec3 albedo = trapAlbedo(gTrap);
             bool degenerate;
             // Match the normal sampling radius to the pixel footprint at the
@@ -429,6 +455,12 @@ void main() {
     int py = int(rp.rowOffset) + int(gy);
 
     if (px >= rp.imageWidth || gy >= uint(rp.rowCount) || py >= rp.imageHeight) return;
+
+    // Object-space fractal rotation for this pixel. R (object->world) from the
+    // uploaded columns; its transpose maps world sample points into the
+    // fractal's frame for the DE. Identity columns -> both are identity.
+    gObjToWorld = mat3(rp.fracRot0.xyz, rp.fracRot1.xyz, rp.fracRot2.xyz);
+    gWorldToObj = transpose(gObjToWorld);
 
     float hitEps    = rp.marchA.x;
     float maxDist   = rp.marchA.y;
