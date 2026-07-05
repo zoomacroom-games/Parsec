@@ -26,6 +26,8 @@ public static class GpuRenders
         new Spec("attractor",   "Thomas strange attractor tube (GPU)"),
         new Spec("mandelbulb",  "Mandelbulb (canonical power-8) (GPU)"),
         new Spec("qjulia",      "Quaternion Julia (half-cut) (GPU)"),
+        new Spec("qjulia-traps", "Quaternion Julia with 3D orbit traps (iq) (GPU)"),
+        new Spec("qjulia-fibers", "Quaternion Julia orbit-streamline fibers (iq) (GPU)"),
         new Spec("rotbox",      "Rotation-augmented Mandelbox (GPU)"),
         new Spec("hybrid",      "Rotated Mandelbox+Mandelbulb hybrid (GPU)"),
         new Spec("qjbox",       "Quaternion-Julia × Mandelbox hybrid (half-cut) (GPU)"),
@@ -49,6 +51,8 @@ public static class GpuRenders
             "attractor"   => RenderAttractor(gl, width, height, progress),
             "mandelbulb"  => RenderMandelbulb(gl, width, height, progress),
             "qjulia"      => RenderQuaternionJulia(gl, width, height, progress),
+            "qjulia-traps" => RenderQuaternionJuliaTraps(gl, width, height, progress),
+            "qjulia-fibers" => RenderQuaternionJuliaFibers(gl, width, height, progress),
             "rotbox"      => RenderRotBox(gl, width, height, progress),
             "hybrid"      => RenderHybrid(gl, width, height, progress),
             "qjbox"       => RenderQJBox(gl, width, height, progress),
@@ -358,6 +362,96 @@ public static class GpuRenders
         return renderer.Render(qj, camera, width, height,
             new RaymarchSettings(
                 MaxSteps: 240, HitEpsilon: 6e-4f, MaxDistance: 14f, NormalEpsilon: 6e-4f,
+                EnableSoftShadows: true, ShadowSteps: 40, ShadowSoftness: 12f,
+                EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(210, 180, 150),
+            lightDirection: new Vector3(0.4f, 0.8f, 0.4f),
+            palette: PaletteParams.Default,
+            tileRows: 32,
+            progress: progress);
+    }
+
+    private static SKBitmap RenderQuaternionJuliaTraps(Gl gl, int width, int height, Action<int, int>? progress)
+    {
+        using var __pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuQuaternionJuliaRenderer(gl, __pipeline);
+        // iq's 3D orbit traps (iquilezles.org/articles/orbittraps3d): a solid
+        // cylinder trap (center/radius per his reference shader, shadertoy
+        // 3tsyzl) materializes as rings repeated through the set. Cut across Y
+        // so the cross-section shows the trapped copies at every scale.
+        var qj = new QuaternionJuliaParams
+        {
+            Iterations = 10,
+            C = new Vector4(-0.2f, 0.8f, 0f, 0f),
+            WSlice = 0f,
+            Cut = true,
+            CutAxis = 1,
+            PlaneOffset = 0f,
+            TrapShape = 2,                          // cylinder along y
+            TrapMode = 1,                           // union into the Julia solid
+            TrapCenter = new Vector3(0.45f, 0f, 0.55f),
+            TrapRadius = 0.1f,
+            TrapFudge = 0.7f,
+        };
+        var camera = new Camera3D(
+            position: new Vector3(2.2f, 1.5f, 2.6f),
+            lookAt: Vector3.Zero,
+            up: Vector3.UnitY,
+            verticalFovRadians: MathF.PI / 4.5f,
+            aspectRatio: (float)width / height);
+
+        return renderer.Render(qj, camera, width, height,
+            new RaymarchSettings(
+                MaxSteps: 300, HitEpsilon: 6e-4f, MaxDistance: 14f, NormalEpsilon: 6e-4f,
+                EnableSoftShadows: true, ShadowSteps: 40, ShadowSoftness: 12f,
+                EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(210, 180, 150),
+            lightDirection: new Vector3(0.4f, 0.8f, 0.4f),
+            palette: PaletteParams.Default,
+            tileRows: 32,
+            progress: progress);
+    }
+
+    private static SKBitmap RenderQuaternionJuliaFibers(Gl gl, int width, int height, Action<int, int>? progress)
+    {
+        using var __pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuQuaternionJuliaRenderer(gl, __pipeline);
+        // Orbit-streamline fiber bundles (the look of iq's "Julia - Quaternion 2",
+        // iquilezles.org/articles/juliasets3d): trap-only mode with a small
+        // sphere trap AT the attracting fixed point. Interior orbits spiral
+        // slowly into the trap, so consecutive preimages of the ball overlap
+        // into tubes tracing the orbit flow; the cut plane exposes the bundle
+        // cross-sections. c is chosen near-parabolic for uniform tube gauge:
+        //   lambda = 0.997 * e^(2*pi*i/7)   (slow 1/7-rotation spiral)
+        //   c  = lambda/2 - lambda^2/4,  fixed point z* = lambda/2.
+        // Iterations trades coverage: too few = sparse fibers, too many = the
+        // tubes fuse solid (every interior point is eventually trapped).
+        var qj = new QuaternionJuliaParams
+        {
+            Iterations = 96,
+            C = new Vector4(0.3661f, 0.1475f, 0f, 0f),
+            WSlice = 0f,
+            Cut = true,
+            CutAxis = 1,
+            PlaneOffset = 0f,
+            TrapShape = 1,                          // sphere
+            TrapMode = 2,                           // trap-only fibers
+            TrapCenter = new Vector3(0.3108f, 0.3898f, 0f),
+            TrapRadius = 0.035f,
+            TrapFudge = 0.6f,
+        };
+        var camera = new Camera3D(
+            position: new Vector3(0.75f, 0.85f, 0.95f),   // close-up on the cut face
+            lookAt: new Vector3(0.0f, -0.1f, 0.1f),
+            up: Vector3.UnitY,
+            verticalFovRadians: MathF.PI / 4.5f,
+            aspectRatio: (float)width / height);
+
+        return renderer.Render(qj, camera, width, height,
+            new RaymarchSettings(
+                MaxSteps: 400, HitEpsilon: 3e-4f, MaxDistance: 14f, NormalEpsilon: 3e-4f,
                 EnableSoftShadows: true, ShadowSteps: 40, ShadowSoftness: 12f,
                 EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f),
             background: new Color(0.02f, 0.03f, 0.07f),

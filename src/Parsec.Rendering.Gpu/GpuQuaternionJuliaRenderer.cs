@@ -42,6 +42,28 @@ public sealed record QuaternionJuliaParams
 
     public float Fudge { get; init; } = 0.9f;
     public float BoundRadius { get; init; } = 2.0f;
+
+    /// <summary>
+    /// Geometric orbit trap shape (iq's "3D orbit traps"): 0 = off, 1 = sphere,
+    /// 2 = cylinder along y, 3 = plane slab at x, 4 = sine sheet. The orbit's
+    /// closest approach to the shape is tracked during iteration;
+    /// <see cref="TrapMode"/> decides what that minimum does.
+    /// </summary>
+    public int TrapShape { get; init; } = 0;
+
+    /// <summary>
+    /// 0 = color-only (trap drives the shell glaze), 1 = union (the shape
+    /// materializes inside the normal Julia solid), 2 = trap-only (the trap
+    /// tubes ARE the geometry; with a small sphere trap at a slowly-attracting
+    /// fixed point this renders orbit-streamline fiber bundles).
+    /// </summary>
+    public int TrapMode { get; init; } = 1;
+    public Vector3 TrapCenter { get; init; } = new(0.45f, 0.0f, 0.55f);
+    public float TrapRadius { get; init; } = 0.1f;
+    public float TrapWaveAmp { get; init; } = 0.25f;
+    public float TrapWaveFreq { get; init; } = 4.0f;
+    /// <summary>Safety factor on the trap DE; the |z'| compensation is first-order.</summary>
+    public float TrapFudge { get; init; } = 0.7f;
 }
 
 /// <summary>
@@ -75,12 +97,17 @@ public sealed class GpuQuaternionJuliaRenderer : IDisposable
         ThrowIfDisposed();
         var foldParams = new FoldParamsGpu
         {
-            Iterations = qj.Iterations, Mode = 0, JuliaMode = 0, Pad0 = 0,
+            Iterations = qj.Iterations,
+            Mode = qj.TrapShape,                  // orbit trap shape selector
+            JuliaMode = qj.TrapMode,              // 0 color-only, 1 union, 2 trap-only
+            Pad0 = 0,
             BoxParams = new Vector4(qj.WSlice, qj.PlaneOffset, qj.Bailout, qj.Cut ? 1f : 0f),
             SurfParams = new Vector4(Vector3.Normalize(qj.PlaneNormal), 0),
             JuliaCVec = qj.C,
             Rot = new Vector4(qj.Stereo ? 1f : 0f, qj.StereoK, qj.StereoR, qj.Fudge),
             BoundSphere = new Vector4(0, 0, 0, qj.BoundRadius),
+            TrapA = new Vector4(qj.TrapCenter, qj.TrapRadius),
+            TrapB = new Vector4(qj.TrapWaveAmp, qj.TrapWaveFreq, qj.TrapFudge, 0),
         };
         return _pipeline.Render(_shader, foldParams, camera, width, height, settings,
                                 background, surface, lightDirection, palette,

@@ -22,6 +22,12 @@ internal struct FoldParamsGpu
     public Vector4 Rot;
     public Vector4 BoundSphere;
 
+    // Geometric orbit traps (quaternion Julia core; other cores leave these
+    // zero). TrapA = (center.xyz, radius); TrapB = (sine amp, sine freq,
+    // trap DE fudge, _). The shape/solid selectors ride Mode/JuliaMode.
+    public Vector4 TrapA;
+    public Vector4 TrapB;
+
     // Octonion core only (appended; other cores declare the shorter prefix and
     // ignore these). c, p, q as octonions: Lo = components 0..3, Hi = 4..7.
     public Vector4 OctCLo;

@@ -45,6 +45,9 @@ layout(std430, binding = 1) readonly buffer FoldParams {
     vec4  rot;              // (_, _, _, fudge)
     vec4  boundSphere;      // (cx, cy, cz, r)
 
+    vec4  trapA;            // unused (quaternion-Julia orbit trap slots; shared layout)
+    vec4  trapB;            // unused
+
     vec4  octCLo;           // c[0..3]
     vec4  octCHi;           // c[4..7]
     vec4  octPLo;           // p[0..3]

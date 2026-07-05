@@ -27,6 +27,19 @@ public sealed class QuaternionJuliaState
     public float StereoK = 1.0f;        // input pre-scale (frames the wrap)
     public float StereoR = 0.8f;        // sphere radius (~boundary => separated lobes)
 
+    // Geometric orbit traps (iq's 3D orbit traps): a shape the orbit is tested
+    // against every iteration. Mode 1 (union) materializes the shape as
+    // geometry repeated through the set; mode 2 (fibers) renders ONLY the trap
+    // tubes -- with a sphere trap at a slowly-attracting fixed point that gives
+    // orbit-streamline fiber bundles; mode 0 just drives the shell glaze.
+    public int TrapShape = 0;           // 0 off, 1 sphere, 2 cylinder, 3 plane, 4 sine
+    public int TrapMode = 1;            // 0 color-only, 1 union, 2 trap-only (fibers)
+    public float TrapX = 0.45f, TrapY = 0.0f, TrapZ = 0.55f;
+    public float TrapRadius = 0.1f;
+    public float TrapWaveAmp = 0.25f;   // sine sheet only
+    public float TrapWaveFreq = 4.0f;   // sine sheet only
+    public float TrapFudge = 0.7f;
+
     public QuaternionJuliaParams ToParams() => new()
     {
         Iterations = Iterations,
@@ -40,6 +53,13 @@ public sealed class QuaternionJuliaState
         StereoR = StereoR,
         Fudge = Fudge,
         BoundRadius = 2.0f,
+        TrapShape = TrapShape,
+        TrapMode = TrapMode,
+        TrapCenter = new Vector3(TrapX, TrapY, TrapZ),
+        TrapRadius = TrapRadius,
+        TrapWaveAmp = TrapWaveAmp,
+        TrapWaveFreq = TrapWaveFreq,
+        TrapFudge = TrapFudge,
     };
 
     public ParamSchema BuildSchema() => new()
@@ -84,8 +104,40 @@ public sealed class QuaternionJuliaState
                 Label = "Stereo radius R", Group = "Stereographic", Min = 0.3, Max = 1.6, Decimals = 2,
                 Get = () => StereoR, Set = v => StereoR = (float)v },
 
+            // Geometric orbit traps. The default center/radius reproduce the
+            // cylinder trap from iq's reference shader (shadertoy 3tsyzl).
             new ParamDescriptor {
-                Label = "Iterations", Group = "Quality", Min = 4, Max = 64, Step = 1, Decimals = 0,
+                Label = "Trap (0off 1sph 2cyl 3pln 4sin)", Group = "Orbit trap", Min = 0, Max = 4, Step = 1, Decimals = 0,
+                Get = () => TrapShape, Set = v => TrapShape = (int)Math.Round(v) },
+            new ParamDescriptor {
+                Label = "Mode (0col 1union 2fibers)", Group = "Orbit trap", Min = 0, Max = 2, Step = 1, Decimals = 0,
+                Get = () => TrapMode, Set = v => TrapMode = (int)Math.Round(v) },
+            new ParamDescriptor {
+                Label = "Trap x", Group = "Orbit trap", Min = -1.5, Max = 1.5, Decimals = 3,
+                Get = () => TrapX, Set = v => TrapX = (float)v },
+            new ParamDescriptor {
+                Label = "Trap y", Group = "Orbit trap", Min = -1.5, Max = 1.5, Decimals = 3,
+                Get = () => TrapY, Set = v => TrapY = (float)v },
+            new ParamDescriptor {
+                Label = "Trap z", Group = "Orbit trap", Min = -1.5, Max = 1.5, Decimals = 3,
+                Get = () => TrapZ, Set = v => TrapZ = (float)v },
+            new ParamDescriptor {
+                Label = "Trap radius", Group = "Orbit trap", Min = 0.02, Max = 1.0, Decimals = 3,
+                Get = () => TrapRadius, Set = v => TrapRadius = (float)v },
+            new ParamDescriptor {
+                Label = "Wave amplitude", Group = "Orbit trap", Min = 0.0, Max = 0.8, Decimals = 3,
+                Get = () => TrapWaveAmp, Set = v => TrapWaveAmp = (float)v },
+            new ParamDescriptor {
+                Label = "Wave frequency", Group = "Orbit trap", Min = 0.0, Max = 12.0, Decimals = 2,
+                Get = () => TrapWaveFreq, Set = v => TrapWaveFreq = (float)v },
+            new ParamDescriptor {
+                Label = "Trap DE fudge", Group = "Orbit trap", Min = 0.3, Max = 1.0, Decimals = 2,
+                Get = () => TrapFudge, Set = v => TrapFudge = (float)v },
+
+            // Fiber-mode traps need long orbits (approach time to the trapped
+            // fixed point), hence the high ceiling.
+            new ParamDescriptor {
+                Label = "Iterations", Group = "Quality", Min = 4, Max = 256, Step = 1, Decimals = 0,
                 Get = () => Iterations, Set = v => Iterations = (int)Math.Round(v) },
             new ParamDescriptor {
                 Label = "DE fudge", Group = "Quality", Min = 0.4, Max = 1.0, Decimals = 2,

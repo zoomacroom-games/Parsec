@@ -18,18 +18,32 @@
 //   - wslice: which 3D slice of the 4D object we see (morphs the whole shape)
 //   - cut plane (normal + offset): which half of the solid we reveal
 //
+// GEOMETRIC ORBIT TRAPS (iquilezles.org/articles/orbittraps3d): while iterating,
+// track the orbit's closest approach to a chosen 3D shape (sphere / cylinder /
+// plane / sine sheet). Seeds whose orbit passes through the shape are solid, so
+// the shape materializes all over the set, repeated at every scale. Each sample
+// is divided by the running derivative |z'| -- in the quaternions the derivative
+// map is a similarity with exactly that scale, so this is the proper first-order
+// compensation for the fractal's domain distortion (iq's "divide by the
+// gradient"). In color-only mode the trap just drives the shell glaze channel.
+//
 // PARAMETER REUSE (shared FoldParams buffer, binding 1):
 //   iterations    = iteration count
+//   mode          = orbit trap shape (0 off, 1 sphere, 2 cylinder, 3 plane, 4 sine)
+//   juliaMode     = orbit trap mode (0 = color-only, 1 = union into the DE,
+//                   2 = trap-only fibers)
 //   juliaC        = the quaternion constant c = (cx, cy, cz, cw)
 //   boxParams     = (wslice, planeOffset, bailout, cutEnabled)
 //   surfParams    = (planeNormal.xyz, _)
 //   rot           = (stereoMode>0.5, stereo scale k, stereo radius R, DE fudge)
 //   boundSphere   = bounding sphere for the fast skip
+//   trapA         = (trap center xyz, trap radius / slab half-thickness)
+//   trapB         = (sine amplitude, sine frequency, trap DE fudge, _)
 
 layout(std430, binding = 1) readonly buffer FoldParams {
     int   iterations;
-    int   mode;             // unused
-    int   juliaMode;        // unused
+    int   mode;             // orbit trap shape: 0 off, 1 sphere, 2 cylinder, 3 plane, 4 sine
+    int   juliaMode;        // orbit trap mode: 0 color-only, 1 union, 2 trap-only
     int   pad0;
 
     vec4  boxParams;        // (wslice, planeOffset, bailout, cutEnabled)
@@ -37,6 +51,9 @@ layout(std430, binding = 1) readonly buffer FoldParams {
     vec4  juliaC;           // quaternion constant c
     vec4  rot;              // (stereoMode, stereoK, stereoR, fudge)
     vec4  boundSphere;      // (cx, cy, cz, r)
+
+    vec4  trapA;            // (trap center xyz, trap radius)
+    vec4  trapB;            // (sine amplitude, sine frequency, trap DE fudge, _)
 } fp;
 
 vec4 gTrap;
@@ -55,6 +72,23 @@ vec4 qmul(vec4 p, vec4 q) {
 vec4 qsq(vec4 q) {
     return vec4(q.x * q.x - q.y * q.y - q.z * q.z - q.w * q.w,
                 2.0 * q.x * q.y, 2.0 * q.x * q.z, 2.0 * q.x * q.w);
+}
+
+// Signed distance from an orbit point (3D projection) to the trap shape. Plain
+// SDFs in orbit space; the fractal domain distortion is compensated at the call
+// site by dividing by |z'|.
+float trapShapeDist(vec3 q) {
+    vec3  tc = fp.trapA.xyz;
+    float tr = fp.trapA.w;
+    if (fp.mode == 1) return length(q - tc) - tr;            // sphere
+    if (fp.mode == 2) return length(q.xz - tc.xz) - tr;      // cylinder along y
+    if (fp.mode == 3) return abs(q.x - tc.x) - tr;           // plane slab at x
+    // Sine sheet: slab of half-thickness tr around y = cy + A*sin(f*(x - cx)).
+    // The vertical residual overestimates distance by up to the graph's slope,
+    // so scale by 1/sqrt(1 + (A*f)^2) to keep it a lower bound.
+    float A = fp.trapB.x, f = fp.trapB.y;
+    float dy = abs(q.y - tc.y - A * sin(f * (q.x - tc.x))) - tr;
+    return dy * inversesqrt(1.0 + A * A * f * f);
 }
 
 float estimate(vec3 p) {
@@ -87,6 +121,7 @@ float estimate(vec3 p) {
     vec4 zp = vec4(1.0, 0.0, 0.0, 0.0);   // running derivative
     float r = 0.0;
     gTrap = vec4(1e20);
+    float trapDE = 1e20;   // geometric trap: min over the orbit of dist/|z'|
 
     for (int i = 0; i < fp.iterations; i++) {
         r = length(z);
@@ -96,13 +131,45 @@ float estimate(vec3 p) {
         gTrap.x = min(gTrap.x, length(z));
         gTrap.y = min(gTrap.y, abs(z.x));
         gTrap.z = min(gTrap.z, length(z.xy));
-        gTrap.w = min(gTrap.w, abs(length(z) - 1.0));
+        if (fp.mode == 0) {
+            gTrap.w = min(gTrap.w, abs(length(z) - 1.0));
+        } else {
+            // Shell glaze channel traces the trap instead of the unit sphere,
+            // so the palette highlights wherever orbits graze the shape.
+            // Divisor clamped at 1: where |z'| < 1 (attracting basin) the
+            // first-order compensation would INFLATE the estimate and the
+            // marcher punches through thin tubes. The unscaled distance is a
+            // conservative bound there (contraction only fattens the tubes in
+            // seed space), so clamping trades speed for no holes.
+            float td = trapShapeDist(z.xyz);
+            gTrap.w = min(gTrap.w, abs(td));
+            trapDE  = min(trapDE, td / max(length(zp), 1.0));
+        }
     }
 
     r = length(z);
     float dz = length(zp);
     float de = (dz < 1e-12) ? 0.0 : 0.5 * log(max(r, 1e-12)) * r / dz;
     de *= deScale;   // conformal correction (1.0 in flat mode)
+
+    // Geometric trap modes. trapDE was measured in orbit space and divided by
+    // |z'| per sample; the seed-map correction (stereographic 1/lambda) is the
+    // same as the main DE's. The trap fudge shrinks steps for safety -- the
+    // compensation is first-order.
+    //   1 = union: the trapped shape materializes inside the normal Julia solid.
+    //   2 = trap-only: the tubes ARE the geometry (drop the Julia surface).
+    //       With a small sphere trap at a slowly-attracting fixed point this
+    //       renders the interior as bundles of orbit-streamline fibers (the
+    //       look of iq's "Julia - Quaternion 2").
+    if (fp.mode != 0 && fp.juliaMode == 1) {
+        de = min(de, trapDE * fp.trapB.z * deScale);
+    } else if (fp.mode != 0 && fp.juliaMode == 2) {
+        de = trapDE * fp.trapB.z * deScale;
+        // Fiber fields are all thin geometry; even the clamped estimate is
+        // first-order, so cap the step at a few trap radii. Costs a bounded
+        // number of extra steps, kills the remaining tube punch-through.
+        de = min(de, 6.0 * fp.trapA.w);
+    }
 
     // Half-cut: intersect the solid with a half-space (CSG intersection = max of
     // signed distances). The plane is dot(p, n) = planeOff, in march space, so it
