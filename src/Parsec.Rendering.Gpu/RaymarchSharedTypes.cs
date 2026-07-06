@@ -28,6 +28,10 @@ internal struct FoldParamsGpu
     public Vector4 TrapA;
     public Vector4 TrapB;
 
+    // Spatially varying c (quaternion Julia core). CVary = (axis 0off/1x/2y/3z,
+    // dc.x, dc.y, dc.z): c(p) = JuliaCVec + p[axis]*dc.xyz.
+    public Vector4 CVary;
+
     // Octonion core only (appended; other cores declare the shorter prefix and
     // ignore these). c, p, q as octonions: Lo = components 0..3, Hi = 4..7.
     public Vector4 OctCLo;

@@ -39,6 +39,15 @@
 //   boundSphere   = bounding sphere for the fast skip
 //   trapA         = (trap center xyz, trap radius / slab half-thickness)
 //   trapB         = (sine amplitude, sine frequency, trap DE fudge, _)
+//   cvary         = (axis 0off/1x/2y/3z, dc.x, dc.y, dc.z) -- SPATIALLY VARYING c
+//
+// SPATIALLY VARYING c ("hybrid" / parameter-field Julia): instead of one global
+// constant, each seed point uses c(p) = juliaC + p[axis]*dc.xyz, so c sweeps
+// across the object along a chosen spatial axis. Every point still iterates a
+// FIXED c during its own orbit (c depends only on the seed), so the per-point
+// DE math is unchanged; but the boundary now moves through space as c does, so
+// the distance metric is only first-order (domain distortion, per iq's orbit-
+// trap note) -- the DE fudge slows the marcher to cope. cw is left untouched.
 
 layout(std430, binding = 1) readonly buffer FoldParams {
     int   iterations;
@@ -54,6 +63,7 @@ layout(std430, binding = 1) readonly buffer FoldParams {
 
     vec4  trapA;            // (trap center xyz, trap radius)
     vec4  trapB;            // (sine amplitude, sine frequency, trap DE fudge, _)
+    vec4  cvary;            // (axis 0off/1x/2y/3z, dc.x, dc.y, dc.z)
 } fp;
 
 vec4 gTrap;
@@ -97,6 +107,15 @@ float estimate(vec3 p) {
     float bailout    = fp.boxParams.z;
     bool  cutEnabled = fp.boxParams.w > 0.5;
     vec4  c          = fp.juliaC;
+
+    // Spatially varying c: shift c by the seed's coordinate along the chosen
+    // axis. Constant for THIS orbit (depends only on p), so the DE recurrence
+    // below is untouched; the fudge covers the boundary's spatial drift.
+    int cvAxis = int(fp.cvary.x + 0.5);
+    if (cvAxis > 0) {
+        float coord = (cvAxis == 1) ? p.x : (cvAxis == 2) ? p.y : p.z;
+        c.xyz += fp.cvary.yzw * coord;
+    }
 
     // --- seed mapping: flat 4D slice, or inverse-stereographic (curved) slice ---
     // Flat: z = (p, wslice) -- the standard flat 3-plane through the 4D set.

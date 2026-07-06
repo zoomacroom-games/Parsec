@@ -40,6 +40,11 @@ public sealed class QuaternionJuliaState
     public float TrapWaveFreq = 4.0f;   // sine sheet only
     public float TrapFudge = 0.7f;
 
+    // Spatially varying c ("hybrid" Julia): c sweeps along a spatial axis so the
+    // fractal morphs across the object. 0 = off (constant c).
+    public int CVaryAxis = 0;           // 0 off, 1=x, 2=y, 3=z
+    public float CGradX = 0.0f, CGradY = 0.2f, CGradZ = 0.0f;
+
     public QuaternionJuliaParams ToParams() => new()
     {
         Iterations = Iterations,
@@ -60,6 +65,8 @@ public sealed class QuaternionJuliaState
         TrapWaveAmp = TrapWaveAmp,
         TrapWaveFreq = TrapWaveFreq,
         TrapFudge = TrapFudge,
+        CVaryAxis = CVaryAxis,
+        CGradient = new Vector3(CGradX, CGradY, CGradZ),
     };
 
     public ParamSchema BuildSchema() => new()
@@ -133,6 +140,22 @@ public sealed class QuaternionJuliaState
             new ParamDescriptor {
                 Label = "Trap DE fudge", Group = "Orbit trap", Min = 0.3, Max = 1.0, Decimals = 2,
                 Get = () => TrapFudge, Set = v => TrapFudge = (float)v },
+
+            // Spatially varying c: the fractal morphs across the object as c
+            // sweeps along the chosen axis. Gradients are the change in each c
+            // component per unit distance.
+            new ParamDescriptor {
+                Label = "c-vary axis (0off 1x 2y 3z)", Group = "Varying c", Min = 0, Max = 3, Step = 1, Decimals = 0,
+                Get = () => CVaryAxis, Set = v => CVaryAxis = (int)Math.Round(v) },
+            new ParamDescriptor {
+                Label = "dc.x / unit", Group = "Varying c", Min = -0.6, Max = 0.6, Decimals = 3,
+                Get = () => CGradX, Set = v => CGradX = (float)v },
+            new ParamDescriptor {
+                Label = "dc.y / unit", Group = "Varying c", Min = -0.6, Max = 0.6, Decimals = 3,
+                Get = () => CGradY, Set = v => CGradY = (float)v },
+            new ParamDescriptor {
+                Label = "dc.z / unit", Group = "Varying c", Min = -0.6, Max = 0.6, Decimals = 3,
+                Get = () => CGradZ, Set = v => CGradZ = (float)v },
 
             // Fiber-mode traps need long orbits (approach time to the trapped
             // fixed point), hence the high ceiling.

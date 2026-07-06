@@ -29,6 +29,7 @@ public static class GpuRenders
         new Spec("qjulia-traps", "Quaternion Julia with 3D orbit traps (iq) (GPU)"),
         new Spec("qjulia-fibers", "Quaternion Julia orbit-streamline fibers (iq) (GPU)"),
         new Spec("qjulia-env",  "Quaternion Julia with skybox + reflective floor (GPU)"),
+        new Spec("qjulia-cvary", "Quaternion Julia with c varying along an axis (GPU)"),
         new Spec("rotbox",      "Rotation-augmented Mandelbox (GPU)"),
         new Spec("hybrid",      "Rotated Mandelbox+Mandelbulb hybrid (GPU)"),
         new Spec("qjbox",       "Quaternion-Julia × Mandelbox hybrid (half-cut) (GPU)"),
@@ -55,6 +56,7 @@ public static class GpuRenders
             "qjulia-traps" => RenderQuaternionJuliaTraps(gl, width, height, progress),
             "qjulia-fibers" => RenderQuaternionJuliaFibers(gl, width, height, progress),
             "qjulia-env"  => RenderQuaternionJuliaEnv(gl, width, height, progress),
+            "qjulia-cvary" => RenderQuaternionJuliaCVary(gl, width, height, progress),
             "rotbox"      => RenderRotBox(gl, width, height, progress),
             "hybrid"      => RenderHybrid(gl, width, height, progress),
             "qjbox"       => RenderQJBox(gl, width, height, progress),
@@ -407,6 +409,45 @@ public static class GpuRenders
             new RaymarchSettings(
                 MaxSteps: 300, HitEpsilon: 6e-4f, MaxDistance: 14f, NormalEpsilon: 6e-4f,
                 EnableSoftShadows: true, ShadowSteps: 40, ShadowSoftness: 12f,
+                EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f),
+            background: new Color(0.02f, 0.03f, 0.07f),
+            surface: Color.Rgb(210, 180, 150),
+            lightDirection: new Vector3(0.4f, 0.8f, 0.4f),
+            palette: PaletteParams.Default,
+            tileRows: 32,
+            progress: progress);
+    }
+
+    private static SKBitmap RenderQuaternionJuliaCVary(Gl gl, int width, int height, Action<int, int>? progress)
+    {
+        using var __pipeline = new RaymarchPipeline(gl);
+        using var renderer = new GpuQuaternionJuliaRenderer(gl, __pipeline);
+        // Spatially varying c ("hybrid" Julia): c.y sweeps along the world y
+        // axis, so each height is a slightly different Julia set and the whole
+        // object morphs top-to-bottom -- the "c changing along an axis" look.
+        // No cut; the DE is first-order under the c-gradient, so the fudge is
+        // dialed down (0.6) to keep the marcher from overstepping.
+        var qj = new QuaternionJuliaParams
+        {
+            Iterations = 14,
+            C = new Vector4(-0.2f, 0.6f, 0f, 0f),   // c at the object's center (y=0)
+            WSlice = 0f,
+            Cut = true, CutAxis = 2, PlaneOffset = 0f,  // cut on z to reveal the morphing bands
+            Fudge = 0.5f,                          // first-order DE under the c-gradient: march slower
+            CVaryAxis = 2,                          // vary along world y
+            CGradient = new Vector3(0f, 0.24f, 0f), // c.y ranges ~0.6 +/- 0.24 over the body
+        };
+        var camera = new Camera3D(
+            position: new Vector3(2.6f, 0.5f, 2.9f),
+            lookAt: Vector3.Zero,
+            up: Vector3.UnitY,
+            verticalFovRadians: MathF.PI / 4.5f,
+            aspectRatio: (float)width / height);
+
+        return renderer.Render(qj, camera, width, height,
+            new RaymarchSettings(
+                MaxSteps: 320, HitEpsilon: 6e-4f, MaxDistance: 14f, NormalEpsilon: 6e-4f,
+                EnableSoftShadows: true, ShadowSteps: 48, ShadowSoftness: 12f,
                 EnableAmbientOcclusion: true, AOSamples: 5, AOStepDistance: 0.03f, AOIntensity: 1.0f),
             background: new Color(0.02f, 0.03f, 0.07f),
             surface: Color.Rgb(210, 180, 150),

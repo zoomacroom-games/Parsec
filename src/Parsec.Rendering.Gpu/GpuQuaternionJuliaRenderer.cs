@@ -64,6 +64,17 @@ public sealed record QuaternionJuliaParams
     public float TrapWaveFreq { get; init; } = 4.0f;
     /// <summary>Safety factor on the trap DE; the |z'| compensation is first-order.</summary>
     public float TrapFudge { get; init; } = 0.7f;
+
+    /// <summary>
+    /// Spatially varying c ("hybrid" / parameter-field Julia): 0 = off (constant
+    /// c), 1/2/3 = c sweeps along the x/y/z spatial axis. Each seed uses
+    /// c(p) = C + p[axis]*<see cref="CGradient"/>, so the fractal morphs across
+    /// the object. The DE becomes first-order (the boundary drifts with c), so
+    /// lower <see cref="Fudge"/> if the surface shows overstep holes.
+    /// </summary>
+    public int CVaryAxis { get; init; } = 0;
+    /// <summary>Rate of change of c.xyz per unit distance along the vary axis.</summary>
+    public Vector3 CGradient { get; init; } = new(0f, 0.2f, 0f);
 }
 
 /// <summary>
@@ -108,6 +119,7 @@ public sealed class GpuQuaternionJuliaRenderer : IDisposable
             BoundSphere = new Vector4(0, 0, 0, qj.BoundRadius),
             TrapA = new Vector4(qj.TrapCenter, qj.TrapRadius),
             TrapB = new Vector4(qj.TrapWaveAmp, qj.TrapWaveFreq, qj.TrapFudge, 0),
+            CVary = new Vector4(qj.CVaryAxis, qj.CGradient.X, qj.CGradient.Y, qj.CGradient.Z),
         };
         return _pipeline.Render(_shader, foldParams, camera, width, height, settings,
                                 background, surface, lightDirection, palette,
